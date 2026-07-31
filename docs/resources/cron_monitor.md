@@ -3,13 +3,10 @@
 page_title: "sentry_cron_monitor Resource - terraform-provider-sentry"
 subcategory: ""
 description: |-
-  ⚠️ This resource is currently in beta and may be subject to change. It is supported by New Monitors and Alerts https://docs.sentry.io/product/new-monitors-and-alerts/ and may not be viewable in the UI today.
   Create a Cron Monitor for a Project.
 ---
 
 # sentry_cron_monitor (Resource)
-
-⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.
 
 Create a Cron Monitor for a Project.
 
@@ -114,8 +111,10 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
+# import using the full URL:
+terraform import sentry_cron_monitor.default https://{organization}.sentry.io/monitors/{id}/
+
 # import using the organization and monitor id from the URL:
-# https://[org-slug].sentry.io/monitors/[monitor-id]/
-# project slug is also required
-terraform import sentry_cron_monitor.default org-slug/project-slug/monitor-id
+# https://{organization}.sentry.io/monitors/{id}/
+terraform import sentry_cron_monitor.default {organization}/{id}
 ```

@@ -8,23 +8,23 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/jianyuan/terraform-provider-sentry/internal/acctest"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 )
 
 func TestAccProjectOwnershipResource(t *testing.T) {
 	rn := "sentry_project_ownership.test"
-	team := acctest.RandomWithPrefix("tf-team")
 	project := acctest.RandomWithPrefix("tf-project")
 	fallThrough := false
 	codeownersAutoSync := false
 	autoAssignment := "Auto Assign to Issue Owner"
-	raw := fmt.Sprintf("path:src/views/* #%s", team)
+	raw := fmt.Sprintf("path:src/views/* #%s", acctest.TestTeam.Slug)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProjectOwnershipConfig(team, project, fallThrough, codeownersAutoSync, autoAssignment, raw),
+				Config: testAccProjectOwnershipConfig(project, fallThrough, codeownersAutoSync, autoAssignment, raw),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rn, "organization", acctest.TestOrganization),
 					resource.TestCheckResourceAttr(rn, "project", project),
@@ -34,52 +34,64 @@ func TestAccProjectOwnershipResource(t *testing.T) {
 					resource.TestCheckResourceAttr(rn, "raw", raw),
 				),
 			},
+			{
+				ResourceName:                         rn,
+				ImportState:                          true,
+				ImportStateIdFunc:                    resourceid.ImportState2PartIDFunc(rn, "organization", "project"),
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "project",
+			},
+			{
+				ResourceName: rn,
+				ImportState:  true,
+				ImportStateIdFunc: resourceid.ImportStateURL2PartIDFunc(
+					rn,
+					"https://{organization}.sentry.io/projects/{project}/",
+					"organization", "organization",
+					"project", "project",
+				),
+				ImportStateVerify:                    true,
+				ImportStateVerifyIdentifierAttribute: "project",
+			},
 		},
 	})
 }
 
 func TestAccProjectOwnershipResource_IllegalAutoAssignment(t *testing.T) {
-	team := acctest.RandomWithPrefix("tf-team")
 	project := acctest.RandomWithPrefix("tf-project")
 	fallThrough := false
 	codeownersAutoSync := false
 	autoAssignment := "This auto-assignment mode is not supported"
-	raw := fmt.Sprintf("path:src/views/* #%s", team)
+	raw := fmt.Sprintf("path:src/views/* #%s", acctest.TestTeam.Slug)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { acctest.PreCheck(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config:      testAccProjectOwnershipConfig(team, project, fallThrough, codeownersAutoSync, autoAssignment, raw),
+				Config:      testAccProjectOwnershipConfig(project, fallThrough, codeownersAutoSync, autoAssignment, raw),
 				ExpectError: regexp.MustCompile(`Attribute auto_assignment value must be one of`),
 			},
 		},
 	})
 }
 
-func testAccProjectOwnershipConfig(teamName string, projectName string, fallThrough bool, codeownersAutoSync bool, autoAssignment string, raw string) string {
-	return testAccOrganizationDataSourceConfig + fmt.Sprintf(`
-resource "sentry_team" "test" {
-	organization = data.sentry_organization.test.slug
-	name         = "%[1]s"
-	slug         = "%[1]s"
-}
-
+func testAccProjectOwnershipConfig(projectName string, fallThrough bool, codeownersAutoSync bool, autoAssignment string, raw string) string {
+	return fmt.Sprintf(`
 resource "sentry_project" "test" {
-	organization = sentry_team.test.organization
-	teams        = [sentry_team.test.slug]
-	name         = "%[2]s"
+	organization = "%[1]s"
+	teams        = ["%[2]s"]
+	name         = "%[3]s"
 	platform     = "go"
 }
 
 resource "sentry_project_ownership" "test" {
 	organization         = sentry_project.test.organization
 	project              = sentry_project.test.id
-	fallthrough          = %[3]t
-	codeowners_auto_sync = %[4]t
-	auto_assignment      = "%[5]s"
-	raw                  = "%[6]s"
+	fallthrough          = %[4]t
+	codeowners_auto_sync = %[5]t
+	auto_assignment      = "%[6]s"
+	raw                  = "%[7]s"
 }
-`, teamName, projectName, fallThrough, codeownersAutoSync, autoAssignment, raw)
+`, acctest.TestOrganization, acctest.TestTeam.Slug, projectName, fallThrough, codeownersAutoSync, autoAssignment, raw)
 }

@@ -15,11 +15,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
-	"github.com/jianyuan/go-utils/ptr"
 	"github.com/jianyuan/terraform-provider-sentry/internal/acctest"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentryclient"
-	"github.com/jianyuan/terraform-provider-sentry/internal/tfutils"
 )
 
 func init() {
@@ -78,7 +77,7 @@ func init() {
 			ctx := context.Background()
 
 			params := &apiclient.ListOrganizationIntegrationsParams{
-				ProviderKey: ptr.Ptr("opsgenie"),
+				ProviderKey: new("opsgenie"),
 			}
 
 			for {
@@ -184,18 +183,9 @@ func TestAccIntegrationOpsgenieResource(t *testing.T) {
 				},
 			},
 			{
-				ResourceName: rn,
-				ImportState:  true,
-				ImportStateIdFunc: func(s *terraform.State) (string, error) {
-					rs, ok := s.RootModule().Resources[rn]
-					if !ok {
-						return "", fmt.Errorf("not found: %s", rn)
-					}
-					organization := rs.Primary.Attributes["organization"]
-					integrationId := rs.Primary.Attributes["integration_id"]
-					id := rs.Primary.ID
-					return tfutils.BuildThreePartId(organization, integrationId, id), nil
-				},
+				ResourceName:      rn,
+				ImportState:       true,
+				ImportStateIdFunc: resourceid.ImportState3PartIDFunc(rn, "organization", "integration_id", "id"),
 				ImportStateVerify: true,
 			},
 		},
@@ -203,18 +193,18 @@ func TestAccIntegrationOpsgenieResource(t *testing.T) {
 }
 
 func testAccIntegrationOpsgenieResourceConfig(teamName string) string {
-	return testAccOrganizationDataSourceConfig + fmt.Sprintf(`
+	return fmt.Sprintf(`
 data "sentry_organization_integration" "opsgenie" {
-	organization = data.sentry_organization.test.slug
+	organization = "%[1]s"
 	provider_key = "opsgenie"
-	name         = "%[1]s"
+	name         = "%[2]s"
 }
 
 resource "sentry_integration_opsgenie" "test" {
-	organization    = data.sentry_organization.test.slug
+	organization    = data.sentry_organization_integration.opsgenie.organization
 	integration_id  = data.sentry_organization_integration.opsgenie.id
-	team            = "%[2]s"
-	integration_key = "%[3]s"
+	team            = "%[3]s"
+	integration_key = "%[4]s"
 }
-`, acctest.TestOpsgenieOrganization, teamName, acctest.TestOpsgenieIntegrationKey)
+`, acctest.TestOrganization, acctest.TestOpsgenieOrganization, teamName, acctest.TestOpsgenieIntegrationKey)
 }

@@ -2,17 +2,17 @@ package sentry
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
-	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/jianyuan/go-sentry/v2/sentry"
 	"github.com/jianyuan/terraform-provider-sentry/internal/providerdata"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentrydata"
-	"github.com/jianyuan/terraform-provider-sentry/internal/tfutils"
 )
 
 func resourceSentryDashboard() *schema.Resource {
@@ -257,7 +257,11 @@ func resourceSentryDashboardCreate(ctx context.Context, d *schema.ResourceData, 
 		return diag.FromErr(err)
 	}
 
-	d.SetId(tfutils.BuildTwoPartId(org, sentry.StringValue(dashboard.ID)))
+	id, err := resourceid.BuildPath2(org, sentry.StringValue(dashboard.ID))
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	d.SetId(id)
 	return resourceSentryDashboardRead(ctx, d, meta)
 }
 
@@ -288,14 +292,18 @@ func resourceSentryDashboardRead(ctx context.Context, d *schema.ResourceData, me
 		return diag.FromErr(err)
 	}
 
-	d.SetId(tfutils.BuildTwoPartId(org, sentry.StringValue(dashboard.ID)))
-	retErr := multierror.Append(
+	id, err := resourceid.BuildPath2(org, sentry.StringValue(dashboard.ID))
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	d.SetId(id)
+	err = errors.Join(
 		d.Set("organization", org),
 		d.Set("title", dashboard.Title),
 		d.Set("widget", flattenDashboardWidgets(dashboard.Widgets)),
 		d.Set("internal_id", dashboard.ID),
 	)
-	return diag.FromErr(retErr.ErrorOrNil())
+	return diag.FromErr(err)
 }
 
 func resourceSentryDashboardUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -335,7 +343,7 @@ func resourceSentryDashboardDelete(ctx context.Context, d *schema.ResourceData, 
 }
 
 func splitSentryDashboardID(id string) (org string, dashboardID string, err error) {
-	org, dashboardID, err = tfutils.SplitTwoPartId(id, "organization-slug", "dashboard-id")
+	org, dashboardID, err = resourceid.Split2Path(id, "organization-slug", "dashboard-id")
 	return
 }
 
@@ -346,13 +354,6 @@ func flattenDashboardWidgets(widgets []*sentry.DashboardWidget) []interface{} {
 
 	widgetList := make([]interface{}, 0, len(widgets))
 	for _, widget := range widgets {
-		layoutMap := make(map[string]interface{})
-		layoutMap["x"] = widget.Layout.X
-		layoutMap["y"] = widget.Layout.Y
-		layoutMap["w"] = widget.Layout.W
-		layoutMap["h"] = widget.Layout.H
-		layoutMap["min_h"] = widget.Layout.MinH
-
 		widgetMap := make(map[string]interface{})
 		widgetMap["id"] = widget.ID
 		widgetMap["title"] = widget.Title
@@ -361,7 +362,19 @@ func flattenDashboardWidgets(widgets []*sentry.DashboardWidget) []interface{} {
 		widgetMap["query"] = flattenDashboardWidgetQueries(widget.Queries)
 		widgetMap["widget_type"] = widget.WidgetType
 		widgetMap["limit"] = widget.Limit
-		widgetMap["layout"] = []interface{}{layoutMap}
+		if widget.Layout != nil {
+			widgetMap["layout"] = []interface{}{
+				map[string]interface{}{
+					"x":     widget.Layout.X,
+					"y":     widget.Layout.Y,
+					"w":     widget.Layout.W,
+					"h":     widget.Layout.H,
+					"min_h": widget.Layout.MinH,
+				},
+			}
+		} else {
+			widgetMap["layout"] = []interface{}{}
+		}
 		widgetList = append(widgetList, widgetMap)
 	}
 	return widgetList

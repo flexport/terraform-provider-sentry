@@ -96,8 +96,8 @@ def parse_constants() -> dict[str, ResultData[Any]]:
     out: dict[str, ResultData[Any]] = {}
     for node in ast.walk(data.tree):
         match node:
-            case ast.Assign(
-                targets=[ast.Name(id="LOG_LEVELS")],
+            case ast.AnnAssign(
+                target=ast.Name(id="LOG_LEVELS"),
                 value=ast.Dict(keys=keys, values=values),
             ):
                 out["LogLevels"] = ResultData(
@@ -190,6 +190,10 @@ def parse_rules_match() -> dict[str, ResultData[Any]]:
                     github_url=data.github_url,
                     result=[],
                 )
+                out["MatchTypeIds"] = ResultData(
+                    github_url=data.github_url,
+                    result=[],
+                )
                 out["MatchTypeNameToId"] = ResultData(
                     github_url=data.github_url,
                     result=OrderedDict(),
@@ -205,6 +209,7 @@ def parse_rules_match() -> dict[str, ResultData[Any]]:
                             value=ast.Constant(value=value),
                         ) if id.isupper():
                             out["MatchTypes"].result.append(id)
+                            out["MatchTypeIds"].result.append(value)
                             out["MatchTypeNameToId"].result[id] = value
                             out["MatchTypeIdToName"].result[value] = id
                         case _:

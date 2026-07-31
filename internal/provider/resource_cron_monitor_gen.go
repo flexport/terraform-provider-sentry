@@ -16,6 +16,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	intresource "github.com/jianyuan/terraform-provider-sentry/internal/resource"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentrydata"
 	"github.com/jianyuan/terraform-provider-sentry/internal/tfutils"
 	supertypes "github.com/orange-cloudavenue/terraform-plugin-framework-supertypes"
@@ -38,7 +39,7 @@ func (r *CronMonitorResource) Metadata(ctx context.Context, req resource.Metadat
 
 func (r *CronMonitorResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.\n\nCreate a Cron Monitor for a Project.",
+		MarkdownDescription: "Create a Cron Monitor for a Project.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The internal ID of this monitor.",
@@ -304,15 +305,11 @@ func (r *CronMonitorResource) Delete(ctx context.Context, req resource.DeleteReq
 }
 
 func (r *CronMonitorResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	organization, project, id, err := tfutils.SplitThreePartId(req.ID, "organization", "project", "id")
-	if err != nil {
-		resp.Diagnostics.AddError("Invalid ID", fmt.Sprintf("Error parsing ID: %s", err.Error()))
-		return
-	}
-
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization"), organization)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project"), project)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
+	intresource.ImportState2Part(
+		"https://{organization}.sentry.io/monitors/{id}/",
+		"organization", "organization",
+		"id", "id",
+	)(ctx, req, resp)
 }
 
 type CronMonitorResourceModel struct {

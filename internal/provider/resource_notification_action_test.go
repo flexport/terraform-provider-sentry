@@ -5,14 +5,12 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/jianyuan/terraform-provider-sentry/internal/acctest"
-	"github.com/jianyuan/terraform-provider-sentry/internal/tfutils"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 )
 
 func TestAccNotificationActionResource(t *testing.T) {
 	rn := "sentry_notification_action.test"
-	team := acctest.RandomWithPrefix("tf-team")
 	project1 := acctest.RandomWithPrefix("tf-project")
 	project2 := acctest.RandomWithPrefix("tf-project")
 
@@ -21,7 +19,7 @@ func TestAccNotificationActionResource(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccNotificationActionConfig(team, project1, project2, "[sentry_project.test_1.slug]"),
+				Config: testAccNotificationActionConfig(project1, project2, "[sentry_project.test_1.slug]"),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rn, "organization", acctest.TestOrganization),
 					resource.TestCheckResourceAttr(rn, "trigger_type", "spike-protection"),
@@ -33,7 +31,7 @@ func TestAccNotificationActionResource(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccNotificationActionConfig(team, project1, project2, "[sentry_project.test_2.slug]"),
+				Config: testAccNotificationActionConfig(project1, project2, "[sentry_project.test_2.slug]"),
 				Check: resource.ComposeTestCheckFunc(
 					resource.TestCheckResourceAttr(rn, "organization", acctest.TestOrganization),
 					resource.TestCheckResourceAttr(rn, "trigger_type", "spike-protection"),
@@ -45,52 +43,38 @@ func TestAccNotificationActionResource(t *testing.T) {
 				),
 			},
 			{
-				ResourceName: rn,
-				ImportState:  true,
-				ImportStateIdFunc: func(s *terraform.State) (string, error) {
-					rs, ok := s.RootModule().Resources[rn]
-					if !ok {
-						return "", fmt.Errorf("not found: %s", rn)
-					}
-					org := rs.Primary.Attributes["organization"]
-					actionId := rs.Primary.ID
-					return tfutils.BuildTwoPartId(org, actionId), nil
-				},
+				ResourceName:      rn,
+				ImportState:       true,
+				ImportStateIdFunc: resourceid.ImportState2PartIDFunc(rn, "organization", "id"),
 				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func testAccNotificationActionConfig(teamName string, project1Name string, project2Name string, projects string) string {
-	return testAccOrganizationDataSourceConfig + fmt.Sprintf(`
-resource "sentry_team" "test" {
-	organization = data.sentry_organization.test.slug
-	name         = "%[1]s"
-	slug         = "%[1]s"
-}
-
+func testAccNotificationActionConfig(project1Name string, project2Name string, projects string) string {
+	return fmt.Sprintf(`
 resource "sentry_project" "test_1" {
-	organization = sentry_team.test.organization
-	teams        = [sentry_team.test.slug]
-	name         = "%[2]s"
-	platform     = "go"
-}
-
-resource "sentry_project" "test_2" {
-	organization = sentry_team.test.organization
-	teams        = [sentry_team.test.slug]
+	organization = "%[1]s"
+	teams        = ["%[2]s"]
 	name         = "%[3]s"
 	platform     = "go"
 }
 
+resource "sentry_project" "test_2" {
+	organization = "%[1]s"
+	teams        = ["%[2]s"]
+	name         = "%[4]s"
+	platform     = "go"
+}
+
 resource "sentry_notification_action" "test" {
-	organization      = sentry_team.test.organization
+	organization      = "%[1]s"
 	trigger_type      = "spike-protection"
 	service_type      = "sentry_notification"
 	target_identifier = "default"
 	target_display    = "default"
-	projects          = %[4]s
+	projects          = %[5]s
 }
-`, teamName, project1Name, project2Name, projects)
+`, acctest.TestOrganization, acctest.TestTeam.Slug, project1Name, project2Name, projects)
 }

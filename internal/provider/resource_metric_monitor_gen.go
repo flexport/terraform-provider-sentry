@@ -16,6 +16,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	intresource "github.com/jianyuan/terraform-provider-sentry/internal/resource"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentrydata"
 	"github.com/jianyuan/terraform-provider-sentry/internal/tfutils"
 	supertypes "github.com/orange-cloudavenue/terraform-plugin-framework-supertypes"
@@ -40,7 +42,7 @@ func (r *MetricMonitorResource) Metadata(ctx context.Context, req resource.Metad
 
 func (r *MetricMonitorResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.\n\nCreate a Metric Monitor for a Project.\n\nFor more information about configuring metric monitors, see [Create a Monitor for a Project](https://docs.sentry.io/api/monitors/create-a-monitor-for-a-project/).",
+		MarkdownDescription: "Create a Metric Monitor for a Project.\n\nFor more information about configuring metric monitors, see [Create a Monitor for a Project](https://docs.sentry.io/api/monitors/create-a-monitor-for-a-project/).",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				MarkdownDescription: "The internal ID of this monitor.",
@@ -136,6 +138,7 @@ func (r *MetricMonitorResource) Schema(ctx context.Context, req resource.SchemaR
 			"query": schema.StringAttribute{
 				MarkdownDescription: "An event search query to subscribe to and monitor for alerts. For example, to filter transactions so that only those with status code 400 are included, you could use `http.status_code:400`.",
 				Optional:            true,
+				Computed:            true,
 				CustomType:          supertypes.StringType{},
 			},
 			"query_type": tfutils.WithEnumStringAttribute(
@@ -144,6 +147,9 @@ func (r *MetricMonitorResource) Schema(ctx context.Context, req resource.SchemaR
 					Optional:            true,
 					Computed:            true,
 					CustomType:          supertypes.StringType{},
+					PlanModifiers: []planmodifier.String{
+						stringplanmodifier.UseStateForUnknown(),
+					},
 				},
 				sentrydata.SnubaQueryTypes,
 			),
@@ -215,13 +221,13 @@ func (r *MetricMonitorResource) Schema(ctx context.Context, req resource.SchemaR
 									},
 									sentrydata.DataConditionTypes,
 								),
-								"comparison": schema.Int64Attribute{
+								"comparison": schema.Float64Attribute{
 									MarkdownDescription: "The value to compare against. Only required for types other than `anomaly_detection`.",
 									Optional:            true,
-									CustomType:          supertypes.Int64Type{},
-									Validators: []validator.Int64{
-										fint64validator.NullIfAttributeIsOneOf(path.MatchRelative().AtParent().AtName("type"), []attr.Value{supertypes.NewStringValue("anomaly_detection")}),
-										fint64validator.RequireIfAttributeIsOneOf(path.MatchRelative().AtParent().AtName("type"), []attr.Value{supertypes.NewStringValue("eq"), supertypes.NewStringValue("gte"), supertypes.NewStringValue("gt"), supertypes.NewStringValue("lte"), supertypes.NewStringValue("lt"), supertypes.NewStringValue("ne")}),
+									CustomType:          types.Float64Type,
+									Validators: []validator.Float64{
+										tfutils.NullIfAttributeIsOneOfFloat64(path.MatchRelative().AtParent().AtName("type"), []attr.Value{supertypes.NewStringValue("anomaly_detection")}),
+										tfutils.RequireIfAttributeIsOneOfFloat64(path.MatchRelative().AtParent().AtName("type"), []attr.Value{supertypes.NewStringValue("eq"), supertypes.NewStringValue("gte"), supertypes.NewStringValue("gt"), supertypes.NewStringValue("lte"), supertypes.NewStringValue("lt"), supertypes.NewStringValue("ne")}),
 									},
 								},
 								"comparison_sensitivity": tfutils.WithEnumStringAttribute(
@@ -387,15 +393,11 @@ func (r *MetricMonitorResource) Delete(ctx context.Context, req resource.DeleteR
 }
 
 func (r *MetricMonitorResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	organization, project, id, err := tfutils.SplitThreePartId(req.ID, "organization", "project", "id")
-	if err != nil {
-		resp.Diagnostics.AddError("Invalid ID", fmt.Sprintf("Error parsing ID: %s", err.Error()))
-		return
-	}
-
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("organization"), organization)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project"), project)...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), id)...)
+	intresource.ImportState2Part(
+		"https://{organization}.sentry.io/monitors/{id}/",
+		"organization", "organization",
+		"id", "id",
+	)(ctx, req, resp)
 }
 
 type MetricMonitorResourceModel struct {
@@ -435,7 +437,7 @@ type MetricMonitorResourceModelConditionGroup struct {
 
 type MetricMonitorResourceModelConditionGroupConditionsItem struct {
 	Type                    supertypes.StringValue `tfsdk:"type"`
-	Comparison              supertypes.Int64Value  `tfsdk:"comparison"`
+	Comparison              types.Float64          `tfsdk:"comparison"`
 	ComparisonSensitivity   supertypes.StringValue `tfsdk:"comparison_sensitivity"`
 	ComparisonThresholdType supertypes.StringValue `tfsdk:"comparison_threshold_type"`
 	ConditionResult         supertypes.Int64Value  `tfsdk:"condition_result"`

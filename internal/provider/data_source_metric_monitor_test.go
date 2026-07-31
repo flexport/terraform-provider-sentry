@@ -11,7 +11,6 @@ import (
 )
 
 func TestAccMetricMonitorDataSource_threshold(t *testing.T) {
-	teamName := acctest.RandomWithPrefix("tf-team")
 	projectName := acctest.RandomWithPrefix("tf-project")
 	monitorName := acctest.RandomWithPrefix("tf-metric-monitor")
 	rn := "data.sentry_metric_monitor.test"
@@ -31,7 +30,7 @@ func TestAccMetricMonitorDataSource_threshold(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccMetricMonitorDataSourceConfig(teamName, projectName, monitorName, `
+				Config: testAccMetricMonitorDataSourceConfig(projectName, monitorName, `
 					aggregate = "count()"
 					dataset = "events"
 					event_types = ["default", "error"]
@@ -69,19 +68,19 @@ func TestAccMetricMonitorDataSource_threshold(t *testing.T) {
 						knownvalue.StringExact("error"),
 					})),
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("query"), knownvalue.StringExact("is:unresolved")),
-					statecheck.ExpectKnownValue(rn, tfjsonpath.New("query_type"), knownvalue.StringExact("error")),
+					statecheck.ExpectKnownValue(rn, tfjsonpath.New("query_type"), knownvalue.Null()),
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("time_window_seconds"), knownvalue.Int64Exact(3600)),
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("condition_group"), knownvalue.ObjectExact(map[string]knownvalue.Check{
 						"logic_type": knownvalue.StringExact("any"),
 						"conditions": knownvalue.ListExact([]knownvalue.Check{
 							knownvalue.ObjectPartial(map[string]knownvalue.Check{
 								"type":             knownvalue.StringExact("gt"),
-								"comparison":       knownvalue.Int64Exact(100),
+								"comparison":       knownvalue.Float64Exact(100),
 								"condition_result": knownvalue.Int64Exact(75),
 							}),
 							knownvalue.ObjectPartial(map[string]knownvalue.Check{
 								"type":             knownvalue.StringExact("lte"),
-								"comparison":       knownvalue.Int64Exact(50),
+								"comparison":       knownvalue.Float64Exact(50),
 								"condition_result": knownvalue.Int64Exact(0),
 							}),
 						}),
@@ -93,7 +92,7 @@ func TestAccMetricMonitorDataSource_threshold(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccMetricMonitorDataSourceConfig(teamName, projectName, monitorName, `
+				Config: testAccMetricMonitorDataSourceConfig(projectName, monitorName, `
 					aggregate = "count()"
 					dataset = "events"
 					event_types = ["default", "error"]
@@ -130,19 +129,19 @@ func TestAccMetricMonitorDataSource_threshold(t *testing.T) {
 						knownvalue.StringExact("error"),
 					})),
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("query"), knownvalue.StringExact("is:unresolved")),
-					statecheck.ExpectKnownValue(rn, tfjsonpath.New("query_type"), knownvalue.StringExact("error")),
+					statecheck.ExpectKnownValue(rn, tfjsonpath.New("query_type"), knownvalue.Null()),
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("time_window_seconds"), knownvalue.Int64Exact(3600)),
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("condition_group"), knownvalue.ObjectExact(map[string]knownvalue.Check{
 						"logic_type": knownvalue.StringExact("any"),
 						"conditions": knownvalue.ListExact([]knownvalue.Check{
 							knownvalue.ObjectPartial(map[string]knownvalue.Check{
 								"type":             knownvalue.StringExact("gt"),
-								"comparison":       knownvalue.Int64Exact(100),
+								"comparison":       knownvalue.Float64Exact(100),
 								"condition_result": knownvalue.Int64Exact(75),
 							}),
 							knownvalue.ObjectPartial(map[string]knownvalue.Check{
 								"type":             knownvalue.StringExact("lte"),
-								"comparison":       knownvalue.Int64Exact(50),
+								"comparison":       knownvalue.Float64Exact(50),
 								"condition_result": knownvalue.Int64Exact(0),
 							}),
 						}),
@@ -150,7 +149,7 @@ func TestAccMetricMonitorDataSource_threshold(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccMetricMonitorDataSourceConfig(teamName, projectName, monitorName+"-updated", `
+				Config: testAccMetricMonitorDataSourceConfig(projectName, monitorName+"-updated", `
 					aggregate = "count()"
 					dataset = "events"
 					event_types = ["default", "error"]
@@ -181,7 +180,7 @@ func TestAccMetricMonitorDataSource_threshold(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccMetricMonitorDataSourceConfig(teamName, projectName, monitorName+"-updated", `
+				Config: testAccMetricMonitorDataSourceConfig(projectName, monitorName+"-updated", `
 					enabled = false
 
 					aggregate = "count()"
@@ -218,7 +217,6 @@ func TestAccMetricMonitorDataSource_threshold(t *testing.T) {
 }
 
 func TestAccMetricMonitorDataSource_dynamic(t *testing.T) {
-	teamName := acctest.RandomWithPrefix("tf-team")
 	projectName := acctest.RandomWithPrefix("tf-project")
 	monitorName := acctest.RandomWithPrefix("tf-metric-monitor")
 	rn := "data.sentry_metric_monitor.test"
@@ -238,7 +236,7 @@ func TestAccMetricMonitorDataSource_dynamic(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccMetricMonitorDataSourceConfig(teamName, projectName, monitorName, `
+				Config: testAccMetricMonitorDataSourceConfig(projectName, monitorName, `
 					aggregate = "count()"
 					dataset = "events"
 					event_types = ["default", "error"]
@@ -272,7 +270,7 @@ func TestAccMetricMonitorDataSource_dynamic(t *testing.T) {
 						knownvalue.StringExact("error"),
 					})),
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("query"), knownvalue.StringExact("is:unresolved")),
-					statecheck.ExpectKnownValue(rn, tfjsonpath.New("query_type"), knownvalue.StringExact("error")),
+					statecheck.ExpectKnownValue(rn, tfjsonpath.New("query_type"), knownvalue.Null()),
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("time_window_seconds"), knownvalue.Int64Exact(3600)),
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("condition_group"), knownvalue.ObjectExact(map[string]knownvalue.Check{
 						"logic_type": knownvalue.StringExact("any"),
@@ -295,8 +293,8 @@ func TestAccMetricMonitorDataSource_dynamic(t *testing.T) {
 	})
 }
 
-func testAccMetricMonitorDataSourceConfig(teamName, projectName, name, extras string) string {
-	return testAccMetricMonitorResourceConfig(teamName, projectName, name, extras) + `
+func testAccMetricMonitorDataSourceConfig(projectName, name, extras string) string {
+	return testAccMetricMonitorResourceConfig(projectName, name, extras) + `
 		data "sentry_metric_monitor" "test" {
 			organization = sentry_metric_monitor.test.organization
 			id           = sentry_metric_monitor.test.id

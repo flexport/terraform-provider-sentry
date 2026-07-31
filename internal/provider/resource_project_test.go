@@ -17,12 +17,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/jianyuan/go-sentry/v2/sentry"
-	"github.com/jianyuan/go-utils/must"
-	"github.com/jianyuan/go-utils/ptr"
-	"github.com/samber/lo"
-
 	"github.com/jianyuan/terraform-provider-sentry/internal/acctest"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
+	"github.com/jianyuan/terraform-provider-sentry/internal/must"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
+	"github.com/samber/lo"
 )
 
 func init() {
@@ -75,12 +74,18 @@ func TestAccProjectResource_basic(t *testing.T) {
 	teamName2 := acctest.RandomWithPrefix("tf-team")
 	teamName3 := acctest.RandomWithPrefix("tf-team")
 	projectName := acctest.RandomWithPrefix("tf-project")
+	projectSlug := acctest.RandomWithPrefix("tf-project")
+	projectSlugRenamed := acctest.RandomWithPrefix("tf-project")
 	rn := "sentry_project.test"
 
 	checkProperties := func(data testAccProjectResourceConfig_teamsData) func(apiclient.Project) error {
 		return func(project apiclient.Project) error {
 			if project.Name != data.ProjectName {
 				return fmt.Errorf("unexpected project name %v", project.Name)
+			}
+
+			if data.ProjectSlug != "" && project.Slug != data.ProjectSlug {
+				return fmt.Errorf("unexpected project slug %v", project.Slug)
 			}
 
 			if v, err := project.Platform.Get(); err == nil {
@@ -103,7 +108,7 @@ func TestAccProjectResource_basic(t *testing.T) {
 				}
 			}
 
-			if len(project.AllowedDomains) != len(ptr.Value(data.AllowedDomains)) {
+			if data.AllowedDomains == nil || len(project.AllowedDomains) != len(*data.AllowedDomains) {
 				return fmt.Errorf("unexpected allowed domains %v", project.AllowedDomains)
 			}
 
@@ -113,21 +118,21 @@ func TestAccProjectResource_basic(t *testing.T) {
 				}
 			}
 
-			if project.ScrapeJavaScript != ptr.Value(data.ScrapeJavascript) {
+			if data.ScrapeJavascript == nil || project.ScrapeJavaScript != *data.ScrapeJavascript {
 				return fmt.Errorf("unexpected scrape javascript %v", project.ScrapeJavaScript)
 			}
 
 			if v, err := project.SecurityTokenHeader.Get(); err == nil {
-				if v != ptr.Value(data.SecurityTokenHeader) {
+				if data.SecurityTokenHeader == nil || v != *data.SecurityTokenHeader {
 					return fmt.Errorf("unexpected security token header %v", v)
 				}
 			} else {
-				if ptr.Value(data.SecurityTokenHeader) != "" {
+				if data.SecurityTokenHeader == nil && *data.SecurityTokenHeader != "" {
 					return fmt.Errorf("unexpected security token header")
 				}
 			}
 
-			if project.VerifySSL != ptr.Value(data.VerifyTlsSsl) {
+			if data.VerifyTlsSsl == nil || project.VerifySSL != *data.VerifyTlsSsl {
 				return fmt.Errorf("unexpected verify tls ssl %v", project.VerifySSL)
 			}
 
@@ -152,14 +157,19 @@ func TestAccProjectResource_basic(t *testing.T) {
 	}
 
 	configStateChecks := func(data testAccProjectResourceConfig_teamsData) []statecheck.StateCheck {
+		var projectSlugCheck knownvalue.Check = knownvalue.NotNull()
+		if data.ProjectSlug != "" {
+			projectSlugCheck = knownvalue.StringExact(data.ProjectSlug)
+		}
+
 		return []statecheck.StateCheck{
-			statecheck.ExpectKnownValue(rn, tfjsonpath.New("id"), knownvalue.NotNull()),
+			statecheck.ExpectKnownValue(rn, tfjsonpath.New("id"), projectSlugCheck),
 			statecheck.ExpectKnownValue(rn, tfjsonpath.New("organization"), knownvalue.StringExact(acctest.TestOrganization)),
 			statecheck.ExpectKnownValue(rn, tfjsonpath.New("teams"), knownvalue.SetExact(lo.Map(data.TeamIds, func(teamId int, _ int) knownvalue.Check {
 				return knownvalue.StringExact(data.AllTeamNames[teamId])
 			}))),
 			statecheck.ExpectKnownValue(rn, tfjsonpath.New("name"), knownvalue.StringExact(data.ProjectName)),
-			statecheck.ExpectKnownValue(rn, tfjsonpath.New("slug"), knownvalue.NotNull()),
+			statecheck.ExpectKnownValue(rn, tfjsonpath.New("slug"), projectSlugCheck),
 			statecheck.ExpectKnownValue(rn, tfjsonpath.New("platform"), knownvalue.StringExact(data.Platform)),
 			statecheck.ExpectKnownValue(rn, tfjsonpath.New("default_rules"), knownvalue.Null()),
 			statecheck.ExpectKnownValue(rn, tfjsonpath.New("default_key"), knownvalue.Null()),
@@ -176,13 +186,13 @@ func TestAccProjectResource_basic(t *testing.T) {
 			statecheck.ExpectKnownValue(rn, tfjsonpath.New("fingerprinting_rules"), knownvalue.StringExact("")),
 			statecheck.ExpectKnownValue(rn, tfjsonpath.New("grouping_enhancements"), knownvalue.StringExact("")),
 			statecheck.ExpectKnownValue(rn, tfjsonpath.New("client_security"), knownvalue.ObjectExact(map[string]knownvalue.Check{
-				"allowed_domains": knownvalue.SetExact(lo.Map(ptr.Value(data.AllowedDomains), func(v string, _ int) knownvalue.Check {
+				"allowed_domains": knownvalue.SetExact(lo.Map(*data.AllowedDomains, func(v string, _ int) knownvalue.Check {
 					return knownvalue.StringExact(v)
 				})),
-				"scrape_javascript":     knownvalue.Bool(ptr.Value(data.ScrapeJavascript)),
+				"scrape_javascript":     knownvalue.Bool(*data.ScrapeJavascript),
 				"security_token":        knownvalue.NotNull(),
-				"security_token_header": knownvalue.StringExact(ptr.Value(data.SecurityTokenHeader)),
-				"verify_tls_ssl":        knownvalue.Bool(ptr.Value(data.VerifyTlsSsl)),
+				"security_token_header": knownvalue.StringExact(*data.SecurityTokenHeader),
+				"verify_tls_ssl":        knownvalue.Bool(*data.VerifyTlsSsl),
 			})),
 			func() statecheck.StateCheck {
 				if data.HighlightTags == nil {
@@ -213,20 +223,20 @@ func TestAccProjectResource_basic(t *testing.T) {
 					TeamIds:             []int{0, 1},
 					ProjectName:         projectName,
 					Platform:            "go",
-					AllowedDomains:      ptr.Ptr([]string{"*"}),
-					ScrapeJavascript:    ptr.Ptr(true),
-					SecurityTokenHeader: ptr.Ptr(""),
-					VerifyTlsSsl:        ptr.Ptr(false),
+					AllowedDomains:      new([]string{"*"}),
+					ScrapeJavascript:    new(true),
+					SecurityTokenHeader: new(""),
+					VerifyTlsSsl:        new(false),
 				})),
 				ConfigStateChecks: configStateChecks(testAccProjectResourceConfig_teamsData{
 					AllTeamNames:        []string{teamName1, teamName2, teamName3},
 					TeamIds:             []int{0, 1},
 					ProjectName:         projectName,
 					Platform:            "go",
-					AllowedDomains:      ptr.Ptr([]string{"*"}),
-					ScrapeJavascript:    ptr.Ptr(true),
-					SecurityTokenHeader: ptr.Ptr(""),
-					VerifyTlsSsl:        ptr.Ptr(false),
+					AllowedDomains:      new([]string{"*"}),
+					ScrapeJavascript:    new(true),
+					SecurityTokenHeader: new(""),
+					VerifyTlsSsl:        new(false),
 				}),
 			},
 			{
@@ -234,29 +244,32 @@ func TestAccProjectResource_basic(t *testing.T) {
 					AllTeamNames:     []string{teamName1, teamName2, teamName3},
 					TeamIds:          []int{0},
 					ProjectName:      projectName + "-renamed",
+					ProjectSlug:      projectSlug,
 					Platform:         "python",
-					ScrapeJavascript: ptr.Ptr(false),
-					VerifyTlsSsl:     ptr.Ptr(true),
+					ScrapeJavascript: new(false),
+					VerifyTlsSsl:     new(true),
 				}),
 				Check: testAccCheckProject(rn, checkProperties(testAccProjectResourceConfig_teamsData{
 					AllTeamNames:        []string{teamName1, teamName2, teamName3},
 					TeamIds:             []int{0},
 					ProjectName:         projectName + "-renamed",
+					ProjectSlug:         projectSlug,
 					Platform:            "python",
-					AllowedDomains:      ptr.Ptr([]string{"*"}),
-					ScrapeJavascript:    ptr.Ptr(false),
-					SecurityTokenHeader: ptr.Ptr(""),
-					VerifyTlsSsl:        ptr.Ptr(true),
+					AllowedDomains:      new([]string{"*"}),
+					ScrapeJavascript:    new(false),
+					SecurityTokenHeader: new(""),
+					VerifyTlsSsl:        new(true),
 				})),
 				ConfigStateChecks: configStateChecks(testAccProjectResourceConfig_teamsData{
 					AllTeamNames:        []string{teamName1, teamName2, teamName3},
 					TeamIds:             []int{0},
 					ProjectName:         projectName + "-renamed",
+					ProjectSlug:         projectSlug,
 					Platform:            "python",
-					AllowedDomains:      ptr.Ptr([]string{"*"}),
-					ScrapeJavascript:    ptr.Ptr(false),
-					SecurityTokenHeader: ptr.Ptr(""),
-					VerifyTlsSsl:        ptr.Ptr(true),
+					AllowedDomains:      new([]string{"*"}),
+					ScrapeJavascript:    new(false),
+					SecurityTokenHeader: new(""),
+					VerifyTlsSsl:        new(true),
 				}),
 			},
 			{
@@ -264,67 +277,73 @@ func TestAccProjectResource_basic(t *testing.T) {
 					AllTeamNames:        []string{teamName1, teamName2, teamName3},
 					TeamIds:             []int{2},
 					ProjectName:         projectName + "-renamed-again",
+					ProjectSlug:         projectSlugRenamed,
 					Platform:            "python",
-					AllowedDomains:      ptr.Ptr([]string{"jianyuan.io", "*.jianyuan.io"}),
-					SecurityTokenHeader: ptr.Ptr("x-my-security-token"),
-					HighlightTags:       ptr.Ptr([]string{"release", "environment"}),
+					AllowedDomains:      new([]string{"jianyuan.io", "*.jianyuan.io"}),
+					SecurityTokenHeader: new("x-my-security-token"),
+					HighlightTags:       new([]string{"release", "environment"}),
 				}),
 				Check: testAccCheckProject(rn, checkProperties(testAccProjectResourceConfig_teamsData{
 					AllTeamNames:        []string{teamName1, teamName2, teamName3},
 					TeamIds:             []int{2},
 					ProjectName:         projectName + "-renamed-again",
+					ProjectSlug:         projectSlugRenamed,
 					Platform:            "python",
-					AllowedDomains:      ptr.Ptr([]string{"jianyuan.io", "*.jianyuan.io"}),
-					ScrapeJavascript:    ptr.Ptr(false),
-					SecurityTokenHeader: ptr.Ptr("x-my-security-token"),
-					VerifyTlsSsl:        ptr.Ptr(true),
-					HighlightTags:       ptr.Ptr([]string{"release", "environment"}),
+					AllowedDomains:      new([]string{"jianyuan.io", "*.jianyuan.io"}),
+					ScrapeJavascript:    new(false),
+					SecurityTokenHeader: new("x-my-security-token"),
+					VerifyTlsSsl:        new(true),
+					HighlightTags:       new([]string{"release", "environment"}),
 				})),
 				ConfigStateChecks: configStateChecks(testAccProjectResourceConfig_teamsData{
 					AllTeamNames:        []string{teamName1, teamName2, teamName3},
 					TeamIds:             []int{2},
 					ProjectName:         projectName + "-renamed-again",
+					ProjectSlug:         projectSlugRenamed,
 					Platform:            "python",
-					AllowedDomains:      ptr.Ptr([]string{"jianyuan.io", "*.jianyuan.io"}),
-					ScrapeJavascript:    ptr.Ptr(false),
-					SecurityTokenHeader: ptr.Ptr("x-my-security-token"),
-					VerifyTlsSsl:        ptr.Ptr(true),
-					HighlightTags:       ptr.Ptr([]string{"release", "environment"}),
+					AllowedDomains:      new([]string{"jianyuan.io", "*.jianyuan.io"}),
+					ScrapeJavascript:    new(false),
+					SecurityTokenHeader: new("x-my-security-token"),
+					VerifyTlsSsl:        new(true),
+					HighlightTags:       new([]string{"release", "environment"}),
 				}),
 			},
-			// Remove all optional attributes
+			// Remove all optional attributes except the slug, which should remain stable after rename.
 			{
 				Config: testAccProjectResourceConfig_teams(testAccProjectResourceConfig_teamsData{
 					AllTeamNames: []string{teamName1, teamName2, teamName3},
 					TeamIds:      []int{2},
 					ProjectName:  projectName + "-renamed-again",
+					ProjectSlug:  projectSlugRenamed,
 					Platform:     "python",
 				}),
 				Check: testAccCheckProject(rn, checkProperties(testAccProjectResourceConfig_teamsData{
 					AllTeamNames:        []string{teamName1, teamName2, teamName3},
 					TeamIds:             []int{2},
 					ProjectName:         projectName + "-renamed-again",
+					ProjectSlug:         projectSlugRenamed,
 					Platform:            "python",
-					AllowedDomains:      ptr.Ptr([]string{"jianyuan.io", "*.jianyuan.io"}),
-					ScrapeJavascript:    ptr.Ptr(false),
-					SecurityTokenHeader: ptr.Ptr("x-my-security-token"),
-					VerifyTlsSsl:        ptr.Ptr(true),
+					AllowedDomains:      new([]string{"jianyuan.io", "*.jianyuan.io"}),
+					ScrapeJavascript:    new(false),
+					SecurityTokenHeader: new("x-my-security-token"),
+					VerifyTlsSsl:        new(true),
 				})),
 				ConfigStateChecks: configStateChecks(testAccProjectResourceConfig_teamsData{
 					AllTeamNames:        []string{teamName1, teamName2, teamName3},
 					TeamIds:             []int{2},
 					ProjectName:         projectName + "-renamed-again",
+					ProjectSlug:         projectSlugRenamed,
 					Platform:            "python",
-					AllowedDomains:      ptr.Ptr([]string{"jianyuan.io", "*.jianyuan.io"}),
-					ScrapeJavascript:    ptr.Ptr(false),
-					SecurityTokenHeader: ptr.Ptr("x-my-security-token"),
-					VerifyTlsSsl:        ptr.Ptr(true),
+					AllowedDomains:      new([]string{"jianyuan.io", "*.jianyuan.io"}),
+					ScrapeJavascript:    new(false),
+					SecurityTokenHeader: new("x-my-security-token"),
+					VerifyTlsSsl:        new(true),
 				}),
 			},
 			{
 				ResourceName:      rn,
 				ImportState:       true,
-				ImportStateIdFunc: acctest.TwoPartImportStateIdFunc(rn, "organization"),
+				ImportStateIdFunc: resourceid.ImportState2PartIDFunc(rn, "organization", "id"),
 				ImportStateVerify: true,
 			},
 		},
@@ -811,6 +830,9 @@ resource "sentry_project" "test" {
 	organization = sentry_team.test.organization
 	teams        = [sentry_team.test.slug]
 	name         = "{{ .ProjectName }}"
+	{{ if .ProjectSlug }}
+	slug         = "{{ .ProjectSlug }}"
+	{{ end }}
 	{{ if .Platform }}
 	platform = "{{ .Platform }}"
 	{{ end }}
@@ -821,6 +843,7 @@ resource "sentry_project" "test" {
 type testAccProjectResourceConfigData struct {
 	TeamName    string
 	ProjectName string
+	ProjectSlug string
 	Platform    string
 	Extras      string
 }
@@ -851,6 +874,9 @@ resource "sentry_project" "test" {
 		{{ end }}
 	]
 	name         = "{{ .ProjectName }}"
+	{{ if .ProjectSlug }}
+	slug         = "{{ .ProjectSlug }}"
+	{{ end }}
 	{{ if .Platform }}
 	platform     = "{{ .Platform }}"
 	{{ end }}
@@ -891,6 +917,7 @@ type testAccProjectResourceConfig_teamsData struct {
 	AllTeamNames        []string
 	TeamIds             []int
 	ProjectName         string
+	ProjectSlug         string
 	Platform            string
 	AllowedDomains      *[]string
 	ScrapeJavascript    *bool

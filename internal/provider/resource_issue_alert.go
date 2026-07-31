@@ -9,17 +9,22 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/jianyuan/go-utils/must"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
 	"github.com/jianyuan/terraform-provider-sentry/internal/diagutils"
+	"github.com/jianyuan/terraform-provider-sentry/internal/must"
+	intresource "github.com/jianyuan/terraform-provider-sentry/internal/resource"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentrydata"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentrytypes"
 	"github.com/jianyuan/terraform-provider-sentry/internal/tfutils"
+	supertypes "github.com/orange-cloudavenue/terraform-plugin-framework-supertypes"
 )
 
 var _ resource.Resource = &IssueAlertResource{}
@@ -28,22 +33,6 @@ var _ resource.ResourceWithValidateConfig = &IssueAlertResource{}
 var _ resource.ResourceWithConfigure = &IssueAlertResource{}
 var _ resource.ResourceWithImportState = &IssueAlertResource{}
 var _ resource.ResourceWithUpgradeState = &IssueAlertResource{}
-
-var (
-	issueAlertConditionV2ElemType types.ObjectType
-	issueAlertFilterV2ElemType    types.ObjectType
-	issueAlertActionV2ElemType    types.ObjectType
-)
-
-func init() {
-	r := &IssueAlertResource{}
-	var resp resource.SchemaResponse
-	r.Schema(context.Background(), resource.SchemaRequest{}, &resp)
-
-	issueAlertConditionV2ElemType = resp.Schema.Attributes["conditions_v2"].(schema.ListNestedAttribute).NestedObject.Type().(types.ObjectType)
-	issueAlertFilterV2ElemType = resp.Schema.Attributes["filters_v2"].(schema.ListNestedAttribute).NestedObject.Type().(types.ObjectType)
-	issueAlertActionV2ElemType = resp.Schema.Attributes["actions_v2"].(schema.ListNestedAttribute).NestedObject.Type().(types.ObjectType)
-}
 
 func NewIssueAlertResource() resource.Resource {
 	return &IssueAlertResource{}
@@ -74,10 +63,17 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 	}, []string{"5m", "15m", "1h", "1d", "1w", "30d"})
 
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "⚠️ This resource is deprecated. Please migrate to [`sentry_alert`](alert.md) resource instead.\n\nCreate an Issue Alert Rule for a Project. See the [Sentry Documentation](https://docs.sentry.io/api/alerts/create-an-issue-alert-rule-for-a-project/) for more information.\n\n" +
+		MarkdownDescription: "⚠️ This resource is deprecated in favor of [`sentry_alert`](alert.md).\n\nCreate an Issue Alert Rule for a Project. See the [Sentry Documentation](https://docs.sentry.io/api/alerts/create-an-issue-alert-rule-for-a-project/) for more information.\n\n" +
+			"### Migrating to `sentry_alert`\n\n" +
+			"A classic issue alert maps onto [`sentry_alert`](alert.md) as follows:\n\n" +
+			"- Issue-state `conditions` (`first_seen_event`, `regression_event`, `reappeared_event`) become `trigger_conditions`. Frequency conditions (e.g. `event_frequency`) move to `action_filters[].conditions` (e.g. `event_frequency_count`).\n" +
+			"- `filters` become `action_filters[].conditions` (e.g. `tagged_event`, `age_comparison`, `level`), and `filter_match` becomes `action_filters[].logic_type`.\n" +
+			"- `actions` become `action_filters[].actions` (e.g. `email`, `slack`), and `frequency` becomes `frequency_minutes`.\n" +
+			"- `sentry_alert` requires `monitor_ids`. For a classic alert that is not tied to a monitor, reference a project default monitor with the [`sentry_project_error_monitor`](../data-sources/project_error_monitor.md) or [`sentry_project_issue_stream_monitor`](../data-sources/project_issue_stream_monitor.md) data source — no monitor resource needs to be created.\n\n" +
+			"A few legacy trigger types (e.g. `new_high_priority_issue`, `existing_high_priority_issue`) are currently only available through `sentry_alert`'s `legacy_trigger_conditions` passthrough.\n\n" +
 			"**NOTE:** The `conditions`, `filters`, and `actions` attributes, which are JSON strings, have been deprecated in favor of `conditions_v2`, `filters_v2`, and `actions_v2`, which are lists of objects.\n\n" +
 			"The `*_v2` attributes are available starting from v0.14.2.",
-		DeprecationMessage: "This resource is deprecated. Please migrate to `sentry_alert` resource instead.",
+		DeprecationMessage: "This resource is deprecated in favor of `sentry_alert`. See the sentry_issue_alert resource documentation for a migration guide (note: `monitor_ids` can reference a project default monitor via the sentry_project_error_monitor / sentry_project_issue_stream_monitor data sources).",
 
 		Version: 2,
 
@@ -106,6 +102,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 			"conditions_v2": schema.ListNestedAttribute{
 				MarkdownDescription: "A list of triggers that determine when the rule fires.",
 				Optional:            true,
+				CustomType:          supertypes.NewListNestedObjectTypeOf[IssueAlertConditionModel](ctx),
 				Validators: []validator.List{
 					listvalidator.ConflictsWith(path.MatchRoot("conditions")),
 				},
@@ -114,6 +111,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"first_seen_event": {
 							MarkdownDescription: "A new issue is created.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertConditionFirstSeenEventModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 							},
@@ -121,6 +119,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"regression_event": {
 							MarkdownDescription: "The issue changes state from resolved to unresolved.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertConditionRegressionEventModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 							},
@@ -128,6 +127,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"reappeared_event": {
 							MarkdownDescription: "The issue changes state from ignored to unresolved.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertConditionReappearedEventModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 							},
@@ -135,6 +135,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"new_high_priority_issue": {
 							MarkdownDescription: "Sentry marks a new issue as high priority.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertConditionNewHighPriorityIssueModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 							},
@@ -142,6 +143,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"existing_high_priority_issue": {
 							MarkdownDescription: "Sentry marks an existing issue as high priority.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertConditionExistingHighPriorityIssueModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 							},
@@ -149,6 +151,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"event_frequency": {
 							MarkdownDescription: "When the `comparison_type` is `count`, the number of events in an issue is more than `value` in `interval`. When the `comparison_type` is `percent`, the number of events in an issue is `value` % higher in `interval` compared to `comparison_interval` ago.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertConditionEventFrequencyModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name":                nameStringAttribute,
 								"comparison_type":     conditionComparisonTypeStringAttribute,
@@ -162,6 +165,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"event_unique_user_frequency": {
 							MarkdownDescription: "When the `comparison_type` is `count`, the number of users affected by an issue is more than `value` in `interval`. When the `comparison_type` is `percent`, the number of users affected by an issue is `value` % higher in `interval` compared to `comparison_interval` ago.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertConditionEventUniqueUserFrequencyModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name":                nameStringAttribute,
 								"comparison_type":     conditionComparisonTypeStringAttribute,
@@ -175,6 +179,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"event_frequency_percent": {
 							MarkdownDescription: "When the `comparison_type` is `count`, the percent of sessions affected by an issue is more than `value` in `interval`. When the `comparison_type` is `percent`, the percent of sessions affected by an issue is `value` % higher in `interval` compared to `comparison_interval` ago.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertConditionEventFrequencyPercentModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name":                nameStringAttribute,
 								"comparison_type":     conditionComparisonTypeStringAttribute,
@@ -203,6 +208,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 			"filters_v2": schema.ListNestedAttribute{
 				MarkdownDescription: "A list of filters that determine if a rule fires after the necessary conditions have been met.",
 				Optional:            true,
+				CustomType:          supertypes.NewListNestedObjectTypeOf[IssueAlertFilterModel](ctx),
 				Validators: []validator.List{
 					listvalidator.ConflictsWith(path.MatchRoot("filters")),
 				},
@@ -211,6 +217,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"age_comparison": {
 							MarkdownDescription: "The issue is older or newer than `value` `time`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertFilterAgeComparisonModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"comparison_type": tfutils.WithEnumStringAttribute(schema.StringAttribute{
@@ -227,6 +234,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"issue_occurrences": {
 							MarkdownDescription: "The issue has happened at least `value` times (Note: this is approximate).",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertFilterIssueOccurrencesModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"value": schema.Int64Attribute{
@@ -237,6 +245,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"assigned_to": {
 							MarkdownDescription: "The issue is assigned to no one, team, or member.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertFilterAssignedToModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"target_type": tfutils.WithEnumStringAttribute(schema.StringAttribute{
@@ -251,6 +260,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"latest_adopted_release": {
 							MarkdownDescription: "The {oldest_or_newest} adopted release associated with the event's issue is {older_or_newer} than the latest adopted release in {environment}.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertFilterLatestAdoptedReleaseModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"oldest_or_newest": tfutils.WithEnumStringAttribute(schema.StringAttribute{
@@ -267,6 +277,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"latest_release": {
 							MarkdownDescription: "The event is from the latest release.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertFilterLatestReleaseModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 							},
@@ -274,6 +285,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"issue_category": {
 							MarkdownDescription: "The issue's category is equal to `value`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertFilterIssueCategoryModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"value": tfutils.WithEnumStringAttribute(schema.StringAttribute{
@@ -284,6 +296,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"event_attribute": {
 							MarkdownDescription: "The event's `attribute` value `match` `value`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertFilterEventAttributeModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"attribute": tfutils.WithEnumStringAttribute(schema.StringAttribute{
@@ -301,6 +314,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"tagged_event": {
 							MarkdownDescription: "The event's tags match `key` `match` `value`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertFilterTaggedEventModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"key": schema.StringAttribute{
@@ -319,6 +333,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"level": {
 							MarkdownDescription: "The event's level is `match` `level`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertFilterLevelModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"match": tfutils.WithEnumStringAttribute(schema.StringAttribute{
@@ -337,7 +352,14 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 				MarkdownDescription: "**Deprecated** in favor of `actions_v2`. A list of actions that take place when all required conditions and filters for the rule are met. In JSON string format.",
 				DeprecationMessage:  "Use `actions_v2` instead.",
 				Optional:            true,
-				CustomType:          sentrytypes.LossyJsonType{},
+				// "label" is API-injected display text on sentry-app action settings
+				// entries — returned on PUT but omitted on GET. Ignoring it lets existing
+				// configs keep label keys while state stores the canonical (label-free)
+				// form. The ignore is recursive: any "label" key in the actions JSON is
+				// dropped from comparison.
+				CustomType: sentrytypes.LossyJsonType{
+					IgnoreKeys: []string{"label"},
+				},
 				Validators: []validator.String{
 					stringvalidator.ConflictsWith(path.MatchRoot("actions_v2")),
 				},
@@ -345,6 +367,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 			"actions_v2": schema.ListNestedAttribute{
 				MarkdownDescription: "A list of actions that take place when all required conditions and filters for the rule are met.",
 				Optional:            true,
+				CustomType:          supertypes.NewListNestedObjectTypeOf[IssueAlertActionModel](ctx),
 				Validators: []validator.List{
 					listvalidator.ConflictsWith(path.MatchRoot("actions")),
 					listvalidator.SizeAtLeast(1),
@@ -354,6 +377,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"notify_email": {
 							MarkdownDescription: "Send a notification to `target_type` and if none can be found then send a notification to `fallthrough_type`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionNotifyEmailModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"target_type": tfutils.WithEnumStringAttribute(schema.StringAttribute{
@@ -366,12 +390,20 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 								"fallthrough_type": tfutils.WithEnumStringAttribute(schema.StringAttribute{
 									MarkdownDescription: "Who the notification should be sent to if there are no suggested assignees.",
 									Optional:            true,
+									// Computed because the API defaults a fallthroughType
+									// (ActiveMembers) for email actions even when one is not
+									// supplied — and for every target_type, not just
+									// IssueOwners (see getsentry/sentry#118404). Without this,
+									// omitting fallthrough_type plans null but the API returns
+									// a value, producing "inconsistent result after apply".
+									Computed: true,
 								}, []string{"AllMembers", "ActiveMembers", "NoOne"}),
 							},
 						},
 						"notify_event": {
 							MarkdownDescription: "Send a notification to all legacy integrations.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionNotifyEventModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 							},
@@ -379,6 +411,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"notify_event_service": {
 							MarkdownDescription: "Send a notification via an integration.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionNotifyEventServiceModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"service": schema.StringAttribute{
@@ -390,20 +423,28 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"notify_event_sentry_app": {
 							MarkdownDescription: "Send a notification to a Sentry app.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionNotifyEventSentryAppModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"sentry_app_installation_uuid": schema.StringAttribute{
 									Required: true,
 								},
 								"settings": schema.MapAttribute{
-									ElementType: types.StringType,
-									Optional:    true,
+									Optional:   true,
+									CustomType: supertypes.NewMapTypeOf[string](ctx),
+								},
+								"settings_labels": schema.MapAttribute{
+									MarkdownDescription: "Optional mapping of setting keys to human-readable display labels. This is primarily used for `async-select` fields in the Sentry UI.",
+									Optional:            true,
+									Computed:            true,
+									CustomType:          supertypes.NewMapTypeOf[string](ctx),
 								},
 							},
 						},
 						"opsgenie_notify_team": {
 							MarkdownDescription: "Send a notification to Opsgenie account `account` and team `team` with `priority` priority.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionOpsgenieNotifyTeam](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"account": schema.StringAttribute{
@@ -420,6 +461,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"pagerduty_notify_service": {
 							MarkdownDescription: "Send a notification to PagerDuty account `account` and service `service` with `severity` severity.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionPagerDutyNotifyServiceModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"account": schema.StringAttribute{
@@ -436,6 +478,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"slack_notify_service": {
 							MarkdownDescription: "Send a notification to the `workspace` Slack workspace to `channel` (optionally, an ID: `channel_id`) and show tags `tags` and notes `notes` in notification.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionSlackNotifyServiceModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"workspace": schema.StringAttribute{
@@ -470,6 +513,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"msteams_notify_service": {
 							MarkdownDescription: "Send a notification to the `team` Team to `channel`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionMsTeamsNotifyServiceModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"team": schema.StringAttribute{
@@ -488,6 +532,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"discord_notify_service": {
 							MarkdownDescription: "Send a notification to the `server` Discord server in the channel with ID or URL: `channel_id` and show tags `tags` in the notification.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionDiscordNotifyServiceModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"server": schema.StringAttribute{
@@ -512,6 +557,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"jira_create_ticket": {
 							MarkdownDescription: "Create a Jira issue in `integration`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionJiraCreateTicketModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"integration": schema.StringAttribute{
@@ -531,6 +577,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"jira_server_create_ticket": {
 							MarkdownDescription: "Create a Jira Server issue in `integration`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionJiraServerCreateTicketModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"integration": schema.StringAttribute{
@@ -550,6 +597,7 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 						"github_create_ticket": {
 							MarkdownDescription: "Create a GitHub issue in `integration`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionGitHubCreateTicketModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"integration": schema.StringAttribute{
@@ -567,13 +615,14 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 								"labels": schema.SetAttribute{
 									MarkdownDescription: "A list of labels to assign to the issue.",
 									Optional:            true,
-									ElementType:         types.StringType,
+									CustomType:          supertypes.NewSetTypeOf[string](ctx),
 								},
 							},
 						},
 						"github_enterprise_create_ticket": {
 							MarkdownDescription: "Create a GitHub Enterprise issue in `integration`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionGitHubEnterpriseCreateTicketModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"integration": schema.StringAttribute{
@@ -591,13 +640,14 @@ func (r *IssueAlertResource) Schema(ctx context.Context, req resource.SchemaRequ
 								"labels": schema.SetAttribute{
 									MarkdownDescription: "A list of labels to assign to the issue.",
 									Optional:            true,
-									ElementType:         types.StringType,
+									CustomType:          supertypes.NewSetTypeOf[string](ctx),
 								},
 							},
 						},
 						"azure_devops_create_ticket": {
 							MarkdownDescription: "Create an Azure DevOps work item in `integration`.",
 							Optional:            true,
+							CustomType:          supertypes.NewSingleNestedObjectTypeOf[IssueAlertActionAzureDevopsCreateTicketModel](ctx),
 							Attributes: map[string]schema.Attribute{
 								"name": nameStringAttribute,
 								"integration": schema.StringAttribute{
@@ -658,9 +708,8 @@ func (r *IssueAlertResource) ValidateConfig(ctx context.Context, req resource.Va
 		return
 	}
 
-	if !data.ConditionsV2.IsNull() && !data.ConditionsV2.IsUnknown() {
-		var conditions []IssueAlertConditionModel
-		resp.Diagnostics.Append(data.ConditionsV2.ElementsAs(ctx, &conditions, false)...)
+	if data.ConditionsV2.IsKnown() {
+		conditions := tfutils.MergeDiagnostics(data.ConditionsV2.Get(ctx))(&resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -676,9 +725,8 @@ func (r *IssueAlertResource) ValidateConfig(ctx context.Context, req resource.Va
 		}
 	}
 
-	if !data.FiltersV2.IsNull() && !data.FiltersV2.IsUnknown() {
-		var filters []IssueAlertFilterModel
-		resp.Diagnostics.Append(data.FiltersV2.ElementsAs(ctx, &filters, false)...)
+	if data.FiltersV2.IsKnown() {
+		filters := tfutils.MergeDiagnostics(data.FiltersV2.Get(ctx))(&resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -702,9 +750,8 @@ func (r *IssueAlertResource) ValidateConfig(ctx context.Context, req resource.Va
 				"You must add an action for this alert to fire",
 			)
 		}
-	} else if !data.ActionsV2.IsNull() && !data.ActionsV2.IsUnknown() {
-		var actions []IssueAlertActionModel
-		resp.Diagnostics.Append(data.ActionsV2.ElementsAs(ctx, &actions, false)...)
+	} else if data.ActionsV2.IsKnown() {
+		actions := tfutils.MergeDiagnostics(data.ActionsV2.Get(ctx))(&resp.Diagnostics)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -869,6 +916,10 @@ func (r *IssueAlertResource) Read(ctx context.Context, req resource.ReadRequest,
 		return
 	}
 
+	resp.Diagnostics.Append(r.read(ctx, &resp.State, &data)...)
+}
+
+func (r *IssueAlertResource) read(ctx context.Context, state *tfsdk.State, data *IssueAlertModel) (diags diag.Diagnostics) {
 	httpResp, err := r.apiClient.GetProjectRuleWithResponse(
 		ctx,
 		data.Organization.ValueString(),
@@ -876,22 +927,23 @@ func (r *IssueAlertResource) Read(ctx context.Context, req resource.ReadRequest,
 		data.Id.ValueString(),
 	)
 	if err != nil {
-		resp.Diagnostics.Append(diagutils.NewClientError("read", err))
+		diags.Append(diagutils.NewClientError("read", err))
 		return
 	} else if httpResp.StatusCode() == http.StatusNotFound {
-		resp.State.RemoveResource(ctx)
+		state.RemoveResource(ctx)
 		return
 	} else if httpResp.StatusCode() != http.StatusOK || httpResp.JSON200 == nil {
-		resp.Diagnostics.Append(diagutils.NewClientStatusError("read", httpResp.StatusCode(), httpResp.Body))
+		diags.Append(diagutils.NewClientStatusError("read", httpResp.StatusCode(), httpResp.Body))
 		return
 	}
 
-	resp.Diagnostics.Append(data.Fill(ctx, *httpResp.JSON200)...)
-	if resp.Diagnostics.HasError() {
+	diags.Append(data.Fill(ctx, *httpResp.JSON200)...)
+	if diags.HasError() {
 		return
 	}
 
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	diags.Append(state.Set(ctx, data)...)
+	return
 }
 
 func (r *IssueAlertResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
@@ -1019,12 +1071,7 @@ func (r *IssueAlertResource) Update(ctx context.Context, req resource.UpdateRequ
 		return
 	}
 
-	resp.Diagnostics.Append(data.Fill(ctx, *httpResp.JSON200)...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	resp.Diagnostics.Append(r.read(ctx, &resp.State, &data)...)
 }
 
 func (r *IssueAlertResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -1053,7 +1100,23 @@ func (r *IssueAlertResource) Delete(ctx context.Context, req resource.DeleteRequ
 }
 
 func (r *IssueAlertResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-	tfutils.ImportStateThreePartId(ctx, "organization", "project", req, resp)
+	intresource.ImportState3PartPath("organization", "project", "id")(ctx, req, resp)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// terraform import only provides the resource ID, never the configuration. Fill
+	// (used by the subsequent Read) only refreshes the conditions/filters/actions
+	// representation that is already present in state: it populates the legacy JSON
+	// attributes when they are non-null, or the typed *_v2 lists when those are
+	// non-null, and otherwise leaves the rule body untouched. After a bare import all
+	// of those attributes are null, so the rule body would never be read back into
+	// state, producing perpetual drift (and a doomed update that targets a rule the
+	// plan thinks must change). Seed the typed (*_v2) lists -- the non-deprecated
+	// representation -- so Read populates the rule body from the API.
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("conditions_v2"), supertypes.NewListNestedObjectValueOfValueSlice(ctx, []IssueAlertConditionModel{}))...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("filters_v2"), supertypes.NewListNestedObjectValueOfValueSlice(ctx, []IssueAlertFilterModel{}))...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("actions_v2"), supertypes.NewListNestedObjectValueOfValueSlice(ctx, []IssueAlertActionModel{}))...)
 }
 
 func (r *IssueAlertResource) UpgradeState(ctx context.Context) map[int64]resource.StateUpgrader {
@@ -1132,7 +1195,7 @@ func (r *IssueAlertResource) UpgradeState(ctx context.Context) map[int64]resourc
 					return
 				}
 
-				organization, project, actionId, err := tfutils.SplitThreePartId(priorStateData.Id.ValueString(), "organization", "project-slug", "alert-id")
+				organization, project, actionId, err := resourceid.Split3Path(priorStateData.Id.ValueString(), "organization", "project-slug", "alert-id")
 				if err != nil {
 					resp.Diagnostics.AddError("Invalid ID", fmt.Sprintf("Error parsing ID: %s", err.Error()))
 					return
@@ -1149,9 +1212,9 @@ func (r *IssueAlertResource) UpgradeState(ctx context.Context) map[int64]resourc
 					Environment:  priorStateData.Environment,
 				}
 
-				upgradedStateData.ConditionsV2 = types.ListNull(issueAlertConditionV2ElemType)
-				upgradedStateData.FiltersV2 = types.ListNull(issueAlertFilterV2ElemType)
-				upgradedStateData.ActionsV2 = types.ListNull(issueAlertActionV2ElemType)
+				upgradedStateData.ConditionsV2 = supertypes.NewListNestedObjectValueOfNull[IssueAlertConditionModel](ctx)
+				upgradedStateData.FiltersV2 = supertypes.NewListNestedObjectValueOfNull[IssueAlertFilterModel](ctx)
+				upgradedStateData.ActionsV2 = supertypes.NewListNestedObjectValueOfNull[IssueAlertActionModel](ctx)
 
 				upgradedStateData.Conditions = sentrytypes.NewLossyJsonNull()
 				if !priorStateData.Conditions.IsNull() {

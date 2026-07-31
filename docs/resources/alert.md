@@ -3,31 +3,42 @@
 page_title: "sentry_alert Resource - terraform-provider-sentry"
 subcategory: ""
 description: |-
-  ⚠️ This resource is currently in beta and may be subject to change. It is supported by New Monitors and Alerts https://docs.sentry.io/product/new-monitors-and-alerts/ and may not be viewable in the UI today.
   Create an Alert for a Monitor in an Organization. Monitors must be created separately using the sentry_cron_monitor cron_monitor.md, sentry_metric_monitor metric_monitor.md, or sentry_uptime_monitor uptime_monitor.md resources.
+  Additionally, default monitors https://docs.sentry.io/product/new-monitors-and-alerts/monitors/#default-monitors are automatically created for each project. Use the following data sources to retrieve them:
+  sentry_project_issue_stream_monitor ../data-sources/project_issue_stream_monitor.md: The default monitor tracking new issues of all types created for a project, including issue types that may not have a dedicated Monitor detecting them (ex. Replay issues)sentry_project_error_monitor ../data-sources/project_error_monitor.md: The default monitor based on issue grouping/fingerprint rules.
 ---
 
 # sentry_alert (Resource)
 
-⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.
-
 Create an Alert for a Monitor in an Organization. Monitors must be created separately using the [`sentry_cron_monitor`](cron_monitor.md), [`sentry_metric_monitor`](metric_monitor.md), or [`sentry_uptime_monitor`](uptime_monitor.md) resources.
+
+Additionally, [default monitors](https://docs.sentry.io/product/new-monitors-and-alerts/monitors/#default-monitors) are automatically created for each project. Use the following data sources to retrieve them:
+  - [`sentry_project_issue_stream_monitor`](../data-sources/project_issue_stream_monitor.md): The default monitor tracking new issues of all types created for a project, including issue types that may not have a dedicated Monitor detecting them (ex. Replay issues)
+  - [`sentry_project_error_monitor`](../data-sources/project_error_monitor.md): The default monitor based on issue grouping/fingerprint rules.
 
 ## Example Usage
 
 ```terraform
-resource "sentry_cron_monitor" "default" {
-  # ...
+# Cron Monitor
+resource "sentry_cron_monitor" "default" { /* ... */ }
+
+# Metric Monitor
+resource "sentry_metric_monitor" "default" { /* ... */ }
+
+# Uptime Monitor
+resource "sentry_uptime_monitor" "default" { /* ... */ }
+
+# Project Issue Stream Monitor: The default monitor tracking new issues of all types created for a project
+data "sentry_project_issue_stream_monitor" "default" {
+  organization = "my-organization"
+  project      = "my-project"
 }
 
-resource "sentry_metric_monitor" "default" {
-  # ...
+# Project Error Monitor: The default monitor based on issue grouping/fingerprint rules.
+data "sentry_project_error_monitor" "default" {
+  organization = "my-organization"
+  project      = "my-project"
 }
-
-resource "sentry_uptime_monitor" "default" {
-  # ...
-}
-
 
 resource "sentry_alert" "default" {
   organization = "my-organization"
@@ -39,6 +50,8 @@ resource "sentry_alert" "default" {
     sentry_cron_monitor.default.id,
     sentry_metric_monitor.default.id,
     sentry_uptime_monitor.default.id,
+    data.sentry_project_issue_stream_monitor.default.id,
+    data.sentry_project_error_monitor.default.id,
   ]
 
   frequency_minutes = 1440
@@ -668,7 +681,9 @@ resource "sentry_alert" "default" {
       logic_type = "all"
       conditions = [
         {
-          issue_priority_deescalating = {}
+          issue_priority_deescalating = {
+            comparison = 75
+          }
         }
       ]
       actions = [
@@ -863,13 +878,13 @@ resource "sentry_alert" "default" {
 - `monitor_ids` (Set of String) The IDs of the monitors to create alerts for.
 - `name` (String) The name of this alert.
 - `organization` (String) The organization slug or internal ID to create the alert for.
-- `trigger_conditions` (Attributes List) The conditions on which the alert will trigger. (see [below for nested schema](#nestedatt--trigger_conditions))
 
 ### Optional
 
 - `enabled` (Boolean) Whether the alert is enabled. Defaults to `true`.
 - `environment` (String) The environment to filter alerts to. Omit or set to `null` to apply to all environments.
 - `legacy_trigger_conditions` (List of String) ⚠️ The trigger condition types listed here are not natively supported by this provider and may be deprecated by Sentry in a future API version. Trigger condition types present on this alert that are not representable in `trigger_conditions` (e.g. `new_high_priority_issue`, `existing_high_priority_issue`, `issue_resolution_change`). When omitted from config these will be removed on the next apply. Set explicitly to preserve them.
+- `trigger_conditions` (Attributes List) The conditions on which the alert will trigger. (see [below for nested schema](#nestedatt--trigger_conditions))
 
 ### Read-Only
 
@@ -900,10 +915,11 @@ Optional:
 - `msteams` (Attributes) Notify on Microsoft Teams. (see [below for nested schema](#nestedatt--action_filters--actions--msteams))
 - `opsgenie` (Attributes) Notify on OpsGenie. (see [below for nested schema](#nestedatt--action_filters--actions--opsgenie))
 - `pagerduty` (Attributes) Notify on PagerDuty. (see [below for nested schema](#nestedatt--action_filters--actions--pagerduty))
-- `plugin` (Attributes) Send a notification to all legacy integrations (plugins). (see [below for nested schema](#nestedatt--action_filters--actions--plugin))
+- `plugin` (Attributes, Deprecated) Send a notification to all legacy integrations (plugins). **Deprecated** Action type plugin is deprecated and cannot be created. (see [below for nested schema](#nestedatt--action_filters--actions--plugin))
 - `sentry_app` (Attributes) Trigger an action in a Sentry App (e.g. Rootly). (see [below for nested schema](#nestedatt--action_filters--actions--sentry_app))
 - `slack` (Attributes) Notify on Slack. (see [below for nested schema](#nestedatt--action_filters--actions--slack))
 - `vsts` (Attributes) Notify on Azure DevOps. (see [below for nested schema](#nestedatt--action_filters--actions--vsts))
+- `webhook` (Attributes) Send a notification via a legacy integration service (e.g. an internal integration's webhook). This is the successor to the `notify_event_service` action on the legacy `sentry_issue_alert` resource. (see [below for nested schema](#nestedatt--action_filters--actions--webhook))
 
 <a id="nestedatt--action_filters--actions--discord"></a>
 ### Nested Schema for `action_filters.actions.discord`
@@ -1051,6 +1067,14 @@ Required:
 - `work_item_type` (String) The type of work item to create.
 
 
+<a id="nestedatt--action_filters--actions--webhook"></a>
+### Nested Schema for `action_filters.actions.webhook`
+
+Required:
+
+- `service` (String) The slug of the integration service to notify. Use the special value `webhooks` to notify all legacy plugin webhooks.
+
+
 
 <a id="nestedatt--action_filters--conditions"></a>
 ### Nested Schema for `action_filters.conditions`
@@ -1067,6 +1091,7 @@ Optional:
 - `issue_occurrences` (Attributes) Issue frequency. (see [below for nested schema](#nestedatt--action_filters--conditions--issue_occurrences))
 - `issue_priority_deescalating` (Attributes) De-escalation. (see [below for nested schema](#nestedatt--action_filters--conditions--issue_priority_deescalating))
 - `issue_priority_greater_or_equal` (Attributes) Issue priority. (see [below for nested schema](#nestedatt--action_filters--conditions--issue_priority_greater_or_equal))
+- `issue_type` (Attributes) Issue type is (or is not) `value`. (see [below for nested schema](#nestedatt--action_filters--conditions--issue_type))
 - `latest_adopted_release` (Attributes) The `release_age_type` adopted release associated with the event's issue is `age_comparison` than the latest adopted release in `environment`. (see [below for nested schema](#nestedatt--action_filters--conditions--latest_adopted_release))
 - `latest_release` (Attributes) The event is from the latest release. (see [below for nested schema](#nestedatt--action_filters--conditions--latest_release))
 - `level` (Attributes) The event's level match `level`. (see [below for nested schema](#nestedatt--action_filters--conditions--level))
@@ -1100,7 +1125,10 @@ Required:
 
 - `attribute` (String) The attribute to evaluate.
 - `match` (String) The match type.
-- `value` (String) The value to compare against.
+
+Optional:
+
+- `value` (String) The value to compare against. Not required when `match` is `is` or `ns`.
 
 
 <a id="nestedatt--action_filters--conditions--event_frequency_count"></a>
@@ -1111,6 +1139,21 @@ Required:
 - `interval` (String) The time period in which to evaluate the value. e.g. Number of events in an issue is more than `value` in `interval`. Valid values are: `1m`, `5m`, `15m`, `1h`, `1d`, `1w`, and `30d`.
 - `value` (Number) A positive integer representing the number of events in an issue that must come in before the alert will fire.
 
+Optional:
+
+- `filters` (Attributes List) A list of additional sub-filters to evaluate before the alert will fire. (see [below for nested schema](#nestedatt--action_filters--conditions--event_frequency_count--filters))
+
+<a id="nestedatt--action_filters--conditions--event_frequency_count--filters"></a>
+### Nested Schema for `action_filters.conditions.event_frequency_count.filters`
+
+Optional:
+
+- `attribute` (String) The attribute of the filter. Conflicts with `key`.
+- `key` (String) The key of the filter. Conflicts with `attribute`.
+- `match` (String) The match type of the filter. Valid values are: `co`, `ew`, `eq`, `gte`, `gt`, `is`, `in`, `lte`, `lt`, `nc`, `new`, `ne`, `ns`, `nsw`, `nin`, and `sw`.
+- `value` (String) The value of the filter.
+
+
 
 <a id="nestedatt--action_filters--conditions--event_frequency_percent"></a>
 ### Nested Schema for `action_filters.conditions.event_frequency_percent`
@@ -1120,6 +1163,21 @@ Required:
 - `comparison_interval` (String) The time period to compare against. Valid values are: `1m`, `5m`, `15m`, `1h`, `1d`, `1w`, and `30d`.
 - `interval` (String) The time period in which to evaluate the value. e.g. Number of events in an issue is `comparisonInterval` percent higher `value` compared to `interval`. Valid values are: `1m`, `5m`, `15m`, `1h`, `1d`, `1w`, and `30d`.
 - `value` (Number) A positive integer representing the number of events in an issue that must come in before the alert will fire.
+
+Optional:
+
+- `filters` (Attributes List) A list of additional sub-filters to evaluate before the alert will fire. (see [below for nested schema](#nestedatt--action_filters--conditions--event_frequency_percent--filters))
+
+<a id="nestedatt--action_filters--conditions--event_frequency_percent--filters"></a>
+### Nested Schema for `action_filters.conditions.event_frequency_percent.filters`
+
+Optional:
+
+- `attribute` (String) The attribute of the filter. Conflicts with `key`.
+- `key` (String) The key of the filter. Conflicts with `attribute`.
+- `match` (String) The match type of the filter. Valid values are: `co`, `ew`, `eq`, `gte`, `gt`, `is`, `in`, `lte`, `lt`, `nc`, `new`, `ne`, `ns`, `nsw`, `nin`, and `sw`.
+- `value` (String) The value of the filter.
+
 
 
 <a id="nestedatt--action_filters--conditions--event_unique_user_frequency_count"></a>
@@ -1169,13 +1227,26 @@ Required:
 <a id="nestedatt--action_filters--conditions--issue_priority_deescalating"></a>
 ### Nested Schema for `action_filters.conditions.issue_priority_deescalating`
 
+Required:
+
+- `comparison` (Number) The minimum priority threshold required to trigger a de-escalation event. The rule triggers when the historical peak priority meets this threshold, and the current priority drops below it.
+
 
 <a id="nestedatt--action_filters--conditions--issue_priority_greater_or_equal"></a>
 ### Nested Schema for `action_filters.conditions.issue_priority_greater_or_equal`
 
 Required:
 
-- `comparison` (Number) he priority the issue must be for the alert to fire.
+- `comparison` (Number) The priority the issue must be for the alert to fire.
+
+
+<a id="nestedatt--action_filters--conditions--issue_type"></a>
+### Nested Schema for `action_filters.conditions.issue_type`
+
+Required:
+
+- `include` (Boolean) If `true`, matches when the issue type equals `value`. If `false`, matches when it does not equal `value`.
+- `value` (String) The issue type slug (e.g. `performance_large_http_payload`).
 
 
 <a id="nestedatt--action_filters--conditions--latest_adopted_release"></a>
@@ -1219,6 +1290,21 @@ Required:
 - `interval` (String) The time period in which to evaluate the value. e.g. Percentage of sessions affected by an issue is `comparisonInterval` percent higher `value` compared to `interval`. Valid values are: `1m`, `5m`, `15m`, `1h`, `1d`, `1w`, and `30d`.
 - `value` (Number) A positive integer representing the number of events in an issue that must come in before the alert will fire.
 
+Optional:
+
+- `filters` (Attributes List) A list of additional sub-filters to evaluate before the alert will fire. (see [below for nested schema](#nestedatt--action_filters--conditions--percent_sessions_percent--filters))
+
+<a id="nestedatt--action_filters--conditions--percent_sessions_percent--filters"></a>
+### Nested Schema for `action_filters.conditions.percent_sessions_percent.filters`
+
+Optional:
+
+- `attribute` (String) The attribute of the filter. Conflicts with `key`.
+- `key` (String) The key of the filter. Conflicts with `attribute`.
+- `match` (String) The match type of the filter. Valid values are: `co`, `ew`, `eq`, `gte`, `gt`, `is`, `in`, `lte`, `lt`, `nc`, `new`, `ne`, `ns`, `nsw`, `nin`, and `sw`.
+- `value` (String) The value of the filter.
+
+
 
 <a id="nestedatt--action_filters--conditions--tagged_event"></a>
 ### Nested Schema for `action_filters.conditions.tagged_event`
@@ -1259,3 +1345,18 @@ Optional:
 
 <a id="nestedatt--trigger_conditions--regression_event"></a>
 ### Nested Schema for `trigger_conditions.regression_event`
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+# import using the full URL:
+terraform import sentry_alert.default https://{organization}.sentry.io/monitors/alerts/{id}/
+
+# import using the organization and alert id from the URL:
+# https://{organization}.sentry.io/monitors/alerts/{id}/
+terraform import sentry_alert.default organization/id
+```

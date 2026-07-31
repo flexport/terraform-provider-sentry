@@ -7,8 +7,9 @@ import (
 	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/jianyuan/go-utils/must"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
+	"github.com/jianyuan/terraform-provider-sentry/internal/must"
+	"github.com/jianyuan/terraform-provider-sentry/internal/sentrytypes"
 	"github.com/jianyuan/terraform-provider-sentry/internal/tfutils"
 	supertypes "github.com/orange-cloudavenue/terraform-plugin-framework-supertypes"
 	"github.com/samber/lo"
@@ -108,8 +109,13 @@ func (r *AlertResource) getActionFilters(ctx context.Context, data AlertResource
 				}
 
 			case inCondition.IssuePriorityDeescalating.IsKnown():
+				inIssuePriorityDeescalating := inCondition.IssuePriorityDeescalating.DiagsGet(ctx, diags)
+				if diags.HasError() {
+					return nil, diags
+				}
+
 				var outIssuePriorityDeescalating apiclient.OrganizationWorkflowActionFilterConditionIssuePriorityDeescalating
-				outIssuePriorityDeescalating.Comparison = true
+				outIssuePriorityDeescalating.Comparison = inIssuePriorityDeescalating.Comparison.Get()
 				outIssuePriorityDeescalating.ConditionResult = true
 
 				if err := outCondition.FromOrganizationWorkflowActionFilterConditionIssuePriorityDeescalating(outIssuePriorityDeescalating); err != nil {
@@ -167,8 +173,21 @@ func (r *AlertResource) getActionFilters(ctx context.Context, data AlertResource
 					return nil, diags
 				}
 
+				inFrequencyCountFilters := inEventFrequencyCount.Filters.DiagsGet(ctx, diags)
+				if diags.HasError() {
+					return nil, diags
+				}
+
 				var outEventFrequencyCount apiclient.OrganizationWorkflowActionFilterConditionEventFrequencyCount
 				outEventFrequencyCount.Comparison.Value = inEventFrequencyCount.Value.Get()
+				outEventFrequencyCount.Comparison.Filters = lo.ToPtr(lo.Map(inFrequencyCountFilters, func(inFilter *AlertResourceModelActionFiltersItemConditionsItemEventFrequencyCountFiltersItem, _ int) apiclient.OrganizationWorkflowActionFilterConditionEventUniqueUserFrequencyCountFilter {
+					return apiclient.OrganizationWorkflowActionFilterConditionEventUniqueUserFrequencyCountFilter{
+						Attribute: inFilter.Attribute.GetPtr(),
+						Key:       inFilter.Key.GetPtr(),
+						Match:     inFilter.Match.GetPtr(),
+						Value:     inFilter.Value.GetPtr(),
+					}
+				}))
 				outEventFrequencyCount.Comparison.Interval = inEventFrequencyCount.Interval.Get()
 				outEventFrequencyCount.ConditionResult = true
 
@@ -183,8 +202,21 @@ func (r *AlertResource) getActionFilters(ctx context.Context, data AlertResource
 					return nil, diags
 				}
 
+				inFrequencyPercentFilters := inEventFrequencyPercent.Filters.DiagsGet(ctx, diags)
+				if diags.HasError() {
+					return nil, diags
+				}
+
 				var outEventFrequencyPercent apiclient.OrganizationWorkflowActionFilterConditionEventFrequencyPercent
 				outEventFrequencyPercent.Comparison.Value = inEventFrequencyPercent.Value.Get()
+				outEventFrequencyPercent.Comparison.Filters = lo.ToPtr(lo.Map(inFrequencyPercentFilters, func(inFilter *AlertResourceModelActionFiltersItemConditionsItemEventFrequencyPercentFiltersItem, _ int) apiclient.OrganizationWorkflowActionFilterConditionEventUniqueUserFrequencyCountFilter {
+					return apiclient.OrganizationWorkflowActionFilterConditionEventUniqueUserFrequencyCountFilter{
+						Attribute: inFilter.Attribute.GetPtr(),
+						Key:       inFilter.Key.GetPtr(),
+						Match:     inFilter.Match.GetPtr(),
+						Value:     inFilter.Value.GetPtr(),
+					}
+				}))
 				outEventFrequencyPercent.Comparison.Interval = inEventFrequencyPercent.Interval.Get()
 				outEventFrequencyPercent.Comparison.ComparisonInterval = inEventFrequencyPercent.ComparisonInterval.Get()
 				outEventFrequencyPercent.ConditionResult = true
@@ -216,8 +248,21 @@ func (r *AlertResource) getActionFilters(ctx context.Context, data AlertResource
 					return nil, diags
 				}
 
+				inSessionsPercentFilters := inPercentSessionsPercent.Filters.DiagsGet(ctx, diags)
+				if diags.HasError() {
+					return nil, diags
+				}
+
 				var outPercentSessionsPercent apiclient.OrganizationWorkflowActionFilterConditionPercentSessionsPercent
 				outPercentSessionsPercent.Comparison.Value = inPercentSessionsPercent.Value.Get()
+				outPercentSessionsPercent.Comparison.Filters = lo.ToPtr(lo.Map(inSessionsPercentFilters, func(inFilter *AlertResourceModelActionFiltersItemConditionsItemPercentSessionsPercentFiltersItem, _ int) apiclient.OrganizationWorkflowActionFilterConditionEventUniqueUserFrequencyCountFilter {
+					return apiclient.OrganizationWorkflowActionFilterConditionEventUniqueUserFrequencyCountFilter{
+						Attribute: inFilter.Attribute.GetPtr(),
+						Key:       inFilter.Key.GetPtr(),
+						Match:     inFilter.Match.GetPtr(),
+						Value:     inFilter.Value.GetPtr(),
+					}
+				}))
 				outPercentSessionsPercent.Comparison.Interval = inPercentSessionsPercent.Interval.Get()
 				outPercentSessionsPercent.Comparison.ComparisonInterval = inPercentSessionsPercent.ComparisonInterval.Get()
 				outPercentSessionsPercent.ConditionResult = true
@@ -236,7 +281,7 @@ func (r *AlertResource) getActionFilters(ctx context.Context, data AlertResource
 				var outEventAttribute apiclient.OrganizationWorkflowActionFilterConditionEventAttribute
 				outEventAttribute.Comparison.Attribute = inEventAttribute.Attribute.Get()
 				outEventAttribute.Comparison.Match = inEventAttribute.Match.Get()
-				outEventAttribute.Comparison.Value = inEventAttribute.Value.Get()
+				outEventAttribute.Comparison.Value = inEventAttribute.Value.GetPtr()
 				outEventAttribute.ConditionResult = true
 
 				if err := outCondition.FromOrganizationWorkflowActionFilterConditionEventAttribute(outEventAttribute); err != nil {
@@ -303,6 +348,22 @@ func (r *AlertResource) getActionFilters(ctx context.Context, data AlertResource
 					diags.AddError("Failed to create condition", err.Error())
 					return nil, diags
 				}
+
+			case inCondition.IssueType.IsKnown():
+				inIssueType := inCondition.IssueType.DiagsGet(ctx, diags)
+				if diags.HasError() {
+					return nil, diags
+				}
+
+				var outIssueType apiclient.OrganizationWorkflowActionFilterConditionIssueType
+				outIssueType.Comparison.Value = inIssueType.Value.Get()
+				outIssueType.Comparison.Include = inIssueType.Include.Get()
+				outIssueType.ConditionResult = true
+
+				if err := outCondition.FromOrganizationWorkflowActionFilterConditionIssueType(outIssueType); err != nil {
+					diags.AddError("Failed to create condition", err.Error())
+					return nil, diags
+				}
 			}
 			outConditions = append(outConditions, outCondition)
 		}
@@ -354,7 +415,7 @@ func (r *AlertResource) getActionFilters(ctx context.Context, data AlertResource
 				outSlack.IntegrationId = inSlack.IntegrationId.Get()
 				outSlack.Config.TargetType = "specific"
 				outSlack.Config.TargetIdentifier = inSlack.ChannelId.Get()
-				outSlack.Config.TargetDisplay = inSlack.ChannelName.Get()
+				outSlack.Config.TargetDisplay = inSlack.ChannelName.ValueString()
 				if inSlack.Tags.IsKnown() {
 					outSlack.Data.Tags = new(inSlack.Tags.Get())
 				}
@@ -415,6 +476,7 @@ func (r *AlertResource) getActionFilters(ctx context.Context, data AlertResource
 				outMsteams.Config.TargetType = "specific"
 				outMsteams.Config.TargetIdentifier = inMsteams.TeamId.Get()
 				outMsteams.Config.TargetDisplay = inMsteams.ChannelName.Get()
+				outMsteams.Data = map[string]interface{}{}
 
 				if err := outAction.FromOrganizationWorkflowActionFilterActionMsTeams(outMsteams); err != nil {
 					diags.AddError("Failed to create action", err.Error())
@@ -560,6 +622,21 @@ func (r *AlertResource) getActionFilters(ctx context.Context, data AlertResource
 					return nil, diags
 				}
 
+			case inAction.Webhook.IsKnown():
+				inWebhook := inAction.Webhook.DiagsGet(ctx, diags)
+				if diags.HasError() {
+					return nil, diags
+				}
+
+				var outWebhook apiclient.OrganizationWorkflowActionFilterActionWebhook
+				outWebhook.Data = map[string]any{}
+				outWebhook.Config.TargetIdentifier = inWebhook.Service.Get()
+
+				if err := outAction.FromOrganizationWorkflowActionFilterActionWebhook(outWebhook); err != nil {
+					diags.AddError("Failed to create action", err.Error())
+					return nil, diags
+				}
+
 			}
 
 			outActions = append(outActions, outAction)
@@ -639,6 +716,11 @@ func (r *AlertResource) getCreateJSONRequestBody(ctx context.Context, data Alert
 		return nil, diags
 	}
 
+	triggerConditions := append(
+		[]apiclient.OrganizationWorkflowTriggerCondition{},
+		tfutils.MergeDiagnostics(r.getTriggerConditions(ctx, data))(&diags)...,
+	)
+
 	req := apiclient.CreateOrganizationWorkflowJSONRequestBody{
 		Name:        data.Name.Get(),
 		Enabled:     data.Enabled.Get(),
@@ -649,7 +731,7 @@ func (r *AlertResource) getCreateJSONRequestBody(ctx context.Context, data Alert
 		DetectorIds: monitorIds,
 		Triggers: apiclient.OrganizationWorkflowTrigger{
 			LogicType:  apiclient.OrganizationWorkflowTriggerLogicTypeAnyShort,
-			Conditions: tfutils.MergeDiagnostics(r.getTriggerConditions(ctx, data))(&diags),
+			Conditions: triggerConditions,
 		},
 		ActionFilters: tfutils.MergeDiagnostics(r.getActionFilters(ctx, data))(&diags),
 	}
@@ -665,6 +747,11 @@ func (r *AlertResource) getUpdateJSONRequestBody(ctx context.Context, data Alert
 		return nil, diags
 	}
 
+	triggerConditions := append(
+		[]apiclient.OrganizationWorkflowTriggerCondition{},
+		tfutils.MergeDiagnostics(r.getTriggerConditions(ctx, data))(&diags)...,
+	)
+
 	req := apiclient.UpdateOrganizationWorkflowJSONRequestBody{
 		Id:          data.Id.Get(),
 		Name:        data.Name.Get(),
@@ -676,7 +763,7 @@ func (r *AlertResource) getUpdateJSONRequestBody(ctx context.Context, data Alert
 		DetectorIds: monitorIds,
 		Triggers: apiclient.OrganizationWorkflowTrigger{
 			LogicType:  apiclient.OrganizationWorkflowTriggerLogicTypeAnyShort,
-			Conditions: tfutils.MergeDiagnostics(r.getTriggerConditions(ctx, data))(&diags),
+			Conditions: triggerConditions,
 		},
 		ActionFilters: tfutils.MergeDiagnostics(r.getActionFilters(ctx, data))(&diags),
 	}
@@ -710,7 +797,7 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 		return aId - bId
 	})
 
-	var triggerConditions []AlertResourceModelTriggerConditionsItem
+	triggerConditions := []AlertResourceModelTriggerConditionsItem{}
 	var legacyTriggerConditions []string
 	for _, triggerCondition := range triggers.Conditions {
 		outTriggerCondition := AlertResourceModelTriggerConditionsItem{
@@ -788,6 +875,7 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 				LatestRelease:                 supertypes.NewSingleNestedObjectValueOfNull[AlertResourceModelActionFiltersItemConditionsItemLatestRelease](ctx),
 				LatestAdoptedRelease:          supertypes.NewSingleNestedObjectValueOfNull[AlertResourceModelActionFiltersItemConditionsItemLatestAdoptedRelease](ctx),
 				Level:                         supertypes.NewSingleNestedObjectValueOfNull[AlertResourceModelActionFiltersItemConditionsItemLevel](ctx),
+				IssueType:                     supertypes.NewSingleNestedObjectValueOfNull[AlertResourceModelActionFiltersItemConditionsItemIssueType](ctx),
 			}
 
 			conditionValue, err := condition.ValueByDiscriminator()
@@ -839,6 +927,7 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 
 			case apiclient.OrganizationWorkflowActionFilterConditionIssuePriorityDeescalating:
 				var issuePriorityDeescalating AlertResourceModelActionFiltersItemConditionsItemIssuePriorityDeescalating
+				issuePriorityDeescalating.Comparison = supertypes.NewInt64Value(conditionValue.Comparison)
 
 				outCondition.IssuePriorityDeescalating = supertypes.NewSingleNestedObjectValueOf(ctx, &issuePriorityDeescalating)
 
@@ -871,6 +960,19 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 				eventFrequencyCount.Value = supertypes.NewInt64Value(conditionValue.Comparison.Value)
 				eventFrequencyCount.Interval = supertypes.NewStringValue(conditionValue.Comparison.Interval)
 
+				outFrequencyCountFilters := []AlertResourceModelActionFiltersItemConditionsItemEventFrequencyCountFiltersItem{}
+				if conditionValue.Comparison.Filters != nil {
+					for _, filter := range *conditionValue.Comparison.Filters {
+						outFrequencyCountFilters = append(outFrequencyCountFilters, AlertResourceModelActionFiltersItemConditionsItemEventFrequencyCountFiltersItem{
+							Attribute: supertypes.NewStringPointerValueOrNull(filter.Attribute),
+							Key:       supertypes.NewStringPointerValueOrNull(filter.Key),
+							Match:     supertypes.NewStringPointerValueOrNull(filter.Match),
+							Value:     supertypes.NewStringPointerValueOrNull(filter.Value),
+						})
+					}
+				}
+				eventFrequencyCount.Filters = supertypes.NewListNestedObjectValueOfValueSlice(ctx, outFrequencyCountFilters)
+
 				outCondition.EventFrequencyCount = supertypes.NewSingleNestedObjectValueOf(ctx, &eventFrequencyCount)
 
 			case apiclient.OrganizationWorkflowActionFilterConditionEventFrequencyPercent:
@@ -878,6 +980,19 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 				eventFrequencyPercent.Value = supertypes.NewInt64Value(conditionValue.Comparison.Value)
 				eventFrequencyPercent.Interval = supertypes.NewStringValue(conditionValue.Comparison.Interval)
 				eventFrequencyPercent.ComparisonInterval = supertypes.NewStringValue(conditionValue.Comparison.ComparisonInterval)
+
+				outFrequencyPercentFilters := []AlertResourceModelActionFiltersItemConditionsItemEventFrequencyPercentFiltersItem{}
+				if conditionValue.Comparison.Filters != nil {
+					for _, filter := range *conditionValue.Comparison.Filters {
+						outFrequencyPercentFilters = append(outFrequencyPercentFilters, AlertResourceModelActionFiltersItemConditionsItemEventFrequencyPercentFiltersItem{
+							Attribute: supertypes.NewStringPointerValueOrNull(filter.Attribute),
+							Key:       supertypes.NewStringPointerValueOrNull(filter.Key),
+							Match:     supertypes.NewStringPointerValueOrNull(filter.Match),
+							Value:     supertypes.NewStringPointerValueOrNull(filter.Value),
+						})
+					}
+				}
+				eventFrequencyPercent.Filters = supertypes.NewListNestedObjectValueOfValueSlice(ctx, outFrequencyPercentFilters)
 
 				outCondition.EventFrequencyPercent = supertypes.NewSingleNestedObjectValueOf(ctx, &eventFrequencyPercent)
 
@@ -894,13 +1009,26 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 				percentSessionsPercent.Interval = supertypes.NewStringValue(conditionValue.Comparison.Interval)
 				percentSessionsPercent.ComparisonInterval = supertypes.NewStringValue(conditionValue.Comparison.ComparisonInterval)
 
+				outSessionsPercentFilters := []AlertResourceModelActionFiltersItemConditionsItemPercentSessionsPercentFiltersItem{}
+				if conditionValue.Comparison.Filters != nil {
+					for _, filter := range *conditionValue.Comparison.Filters {
+						outSessionsPercentFilters = append(outSessionsPercentFilters, AlertResourceModelActionFiltersItemConditionsItemPercentSessionsPercentFiltersItem{
+							Attribute: supertypes.NewStringPointerValueOrNull(filter.Attribute),
+							Key:       supertypes.NewStringPointerValueOrNull(filter.Key),
+							Match:     supertypes.NewStringPointerValueOrNull(filter.Match),
+							Value:     supertypes.NewStringPointerValueOrNull(filter.Value),
+						})
+					}
+				}
+				percentSessionsPercent.Filters = supertypes.NewListNestedObjectValueOfValueSlice(ctx, outSessionsPercentFilters)
+
 				outCondition.PercentSessionsPercent = supertypes.NewSingleNestedObjectValueOf(ctx, &percentSessionsPercent)
 
 			case apiclient.OrganizationWorkflowActionFilterConditionEventAttribute:
 				var eventAttribute AlertResourceModelActionFiltersItemConditionsItemEventAttribute
 				eventAttribute.Attribute = supertypes.NewStringValue(conditionValue.Comparison.Attribute)
 				eventAttribute.Match = supertypes.NewStringValue(conditionValue.Comparison.Match)
-				eventAttribute.Value = supertypes.NewStringValue(conditionValue.Comparison.Value)
+				eventAttribute.Value = supertypes.NewStringPointerValueOrNull(conditionValue.Comparison.Value)
 
 				outCondition.EventAttribute = supertypes.NewSingleNestedObjectValueOf(ctx, &eventAttribute)
 
@@ -931,6 +1059,13 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 				level.Level = supertypes.NewInt64Value(conditionValue.Comparison.Level)
 
 				outCondition.Level = supertypes.NewSingleNestedObjectValueOf(ctx, &level)
+
+			case apiclient.OrganizationWorkflowActionFilterConditionIssueType:
+				var issueType AlertResourceModelActionFiltersItemConditionsItemIssueType
+				issueType.Value = supertypes.NewStringValue(conditionValue.Comparison.Value)
+				issueType.Include = supertypes.NewBoolValue(conditionValue.Comparison.Include)
+
+				outCondition.IssueType = supertypes.NewSingleNestedObjectValueOf(ctx, &issueType)
 			}
 
 			outConditions = append(outConditions, outCondition)
@@ -952,6 +1087,7 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 				JiraServer: supertypes.NewSingleNestedObjectValueOfNull[AlertResourceModelActionFiltersItemActionsItemJiraServer](ctx),
 				Github:     supertypes.NewSingleNestedObjectValueOfNull[AlertResourceModelActionFiltersItemActionsItemGithub](ctx),
 				SentryApp:  supertypes.NewSingleNestedObjectValueOfNull[AlertResourceModelActionFiltersItemActionsItemSentryApp](ctx),
+				Webhook:    supertypes.NewSingleNestedObjectValueOfNull[AlertResourceModelActionFiltersItemActionsItemWebhook](ctx),
 			}
 
 			actionValue, err := action.ValueByDiscriminator()
@@ -982,7 +1118,7 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 				var outSlack AlertResourceModelActionFiltersItemActionsItemSlack
 				outSlack.IntegrationId = supertypes.NewStringValue(actionValue.IntegrationId)
 				outSlack.ChannelId = supertypes.NewStringValue(actionValue.Config.TargetIdentifier)
-				outSlack.ChannelName = supertypes.NewStringValue(actionValue.Config.TargetDisplay)
+				outSlack.ChannelName = sentrytypes.NewSlackChannelValue(actionValue.Config.TargetDisplay)
 				if actionValue.Data.Tags != nil {
 					outSlack.Tags = supertypes.NewStringValue(*actionValue.Data.Tags)
 				}
@@ -1082,6 +1218,12 @@ func (m *AlertResourceModel) Fill(ctx context.Context, data apiclient.Organizati
 				}
 
 				outAction.SentryApp = supertypes.NewSingleNestedObjectValueOf(ctx, &outSentryApp)
+
+			case apiclient.OrganizationWorkflowActionFilterActionWebhook:
+				var outWebhook AlertResourceModelActionFiltersItemActionsItemWebhook
+				outWebhook.Service = supertypes.NewStringValue(actionValue.Config.TargetIdentifier)
+
+				outAction.Webhook = supertypes.NewSingleNestedObjectValueOf(ctx, &outWebhook)
 			}
 
 			if diags.HasError() {

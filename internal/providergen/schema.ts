@@ -6,7 +6,8 @@ export type ComputedOptionalRequired =
 
 export type Attribute =
   | StringAttribute
-  | IntAttribute
+  | Int64Attribute
+  | Float64Attribute
   | BoolAttribute
   | ListAttribute
   | ListNestedAttribute
@@ -42,8 +43,12 @@ export interface StringAttribute extends BaseAttribute {
   type: "string";
 }
 
-export interface IntAttribute extends BaseAttribute {
-  type: "int";
+export interface Int64Attribute extends BaseAttribute {
+  type: "int64";
+}
+
+export interface Float64Attribute extends BaseAttribute {
+  type: "float64";
 }
 
 export interface BoolAttribute extends BaseAttribute {
@@ -90,25 +95,32 @@ export interface SingleNestedAttribute extends BaseAttribute {
 
 export interface BaseDataSourceApiStrategy {
   model: string;
-  readMethod: string;
-  readRequestAttributes?: Array<string>;
 }
 
 export type DataSourceApiStrategy =
   | SimpleDataSourceApiStrategy
-  | PaginateDataSourceApiStrategy;
+  | PaginateDataSourceApiStrategy
+  | CustomDataSourceApiStrategy;
 
 export interface SimpleDataSourceApiStrategy extends BaseDataSourceApiStrategy {
   readStrategy: "simple";
+  readMethod: string;
+  readRequestAttributes?: Array<string>;
 }
 
 export interface PaginateDataSourceApiStrategy extends BaseDataSourceApiStrategy {
   readStrategy: "paginate";
+  readMethod: string;
+  readRequestAttributes?: Array<string>;
   readModel?: string;
   readCursorParam?: string;
   readInitLoop?: string;
   readPreIterate?: string;
   readPostIterate?: string;
+}
+
+export interface CustomDataSourceApiStrategy extends BaseDataSourceApiStrategy {
+  readStrategy: "custom";
 }
 
 export interface DataSource {
@@ -143,6 +155,9 @@ export interface Resource {
   generate?: {
     modelFillers?: boolean;
   };
-  importStateAttributes?: Array<string>;
+  import?: {
+    url?: string;
+    targetAttributes?: Array<string>;
+  };
   attributes: Array<Attribute>;
 }

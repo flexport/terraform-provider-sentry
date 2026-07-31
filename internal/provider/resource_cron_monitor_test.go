@@ -12,9 +12,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
-	"github.com/jianyuan/go-utils/ptr"
 	"github.com/jianyuan/terraform-provider-sentry/internal/acctest"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentryclient"
 )
 
@@ -25,7 +25,7 @@ func init() {
 			ctx := context.Background()
 
 			params := &apiclient.ListOrganizationMonitorsParams{
-				Query: ptr.Ptr("!type:issue_stream type:monitor_check_in_failure"),
+				Query: new("!type:issue_stream type:monitor_check_in_failure"),
 			}
 
 			for {
@@ -276,7 +276,6 @@ func TestAccCronMonitorResource_validation(t *testing.T) {
 }
 
 func TestAccCronMonitorResource_basic(t *testing.T) {
-	teamName := acctest.RandomWithPrefix("tf-team")
 	projectName := acctest.RandomWithPrefix("tf-project")
 	monitorName := acctest.RandomWithPrefix("tf-cron-monitor")
 	rn := "sentry_cron_monitor.test"
@@ -296,7 +295,7 @@ func TestAccCronMonitorResource_basic(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccCronMonitorResourceConfig(teamName, projectName, monitorName, `
+				Config: testAccCronMonitorResourceConfig(projectName, monitorName, `
 					description = "cron monitor description"
 					checkin_margin_minutes = 1
 					failure_issue_threshold = 2
@@ -324,7 +323,7 @@ func TestAccCronMonitorResource_basic(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccCronMonitorResourceConfig(teamName, projectName, monitorName+"-updated", `
+				Config: testAccCronMonitorResourceConfig(projectName, monitorName+"-updated", `
 					enabled = true
 					checkin_margin_minutes = 10
 					failure_issue_threshold = 20
@@ -351,7 +350,7 @@ func TestAccCronMonitorResource_basic(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccCronMonitorResourceConfig(teamName, projectName, monitorName+"-updated", `
+				Config: testAccCronMonitorResourceConfig(projectName, monitorName+"-updated", `
 					enabled = false
 					checkin_margin_minutes = 10
 					failure_issue_threshold = 20
@@ -378,31 +377,47 @@ func TestAccCronMonitorResource_basic(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:      rn,
-				ImportState:       true,
-				ImportStateIdFunc: acctest.ThreePartImportStateIdFunc(rn, "organization", "project"),
-				ImportStateVerify: true,
+				ResourceName:            rn,
+				ImportState:             true,
+				ImportStateIdFunc:       resourceid.ImportState2PartIDFunc(rn, "organization", "id"),
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"project"},
+			},
+			{
+				ResourceName: rn,
+				ImportState:  true,
+				ImportStateIdFunc: resourceid.ImportStateURL2PartIDFunc(
+					rn,
+					"https://{organization}.sentry.io/monitors/{id}/",
+					"organization", "organization",
+					"id", "id",
+				),
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"project"},
 			},
 		},
 	})
 }
 
-func testAccCronMonitorResourceConfig(teamName, projectName, name, extras string) string {
-	return testAccProjectResourceConfig(testAccProjectResourceConfigData{
-		TeamName:    teamName,
-		ProjectName: projectName,
-		Platform:    "go",
-	}) + fmt.Sprintf(`
-		resource "sentry_cron_monitor" "test" {
-			organization = data.sentry_organization.test.slug
-			project      = sentry_project.test.slug
-			name         = "%[1]s"
+func testAccCronMonitorResourceConfig(projectName, name, extras string) string {
+	return fmt.Sprintf(`
+		resource "sentry_project" "test" {
+			organization = "%[1]s"
+			teams        = ["%[3]s"]
+			name         = "%[4]s"
+			platform     = "go"
+		}
 
-			%[2]s
+		resource "sentry_cron_monitor" "test" {
+			organization = "%[1]s"
+			project      = sentry_project.test.slug
+			name         = "%[5]s"
+
+			%[6]s
 
 			owner = {
-				team_id = sentry_team.test.internal_id
+				team_id = "%[2]s"
 			}
 		}
-	`, name, extras)
+	`, acctest.TestOrganization, acctest.TestTeam.Id, acctest.TestTeam.Slug, projectName, name, extras)
 }

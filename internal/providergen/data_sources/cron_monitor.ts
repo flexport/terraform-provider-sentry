@@ -1,13 +1,8 @@
-import dedent from "dedent";
 import type { DataSource } from "../schema";
 
 export default {
   name: "cron_monitor",
-  description: dedent.withOptions({ trimWhitespace: true })`
-      ⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.
-
-      Retrieve a Cron Monitor.
-    `,
+  description: "Retrieve a Cron Monitor.",
   api: {
     model: "ProjectMonitor",
     readStrategy: "simple",
@@ -81,7 +76,7 @@ export default {
     },
     {
       name: "checkin_margin_minutes",
-      type: "int",
+      type: "int64",
       description:
         "Grace period. The number of minutes before a check-in is considered missed.",
       computedOptionalRequired: "computed",
@@ -89,7 +84,7 @@ export default {
     },
     {
       name: "failure_issue_threshold",
-      type: "int",
+      type: "int64",
       description:
         "Failure tolerance. Create a new issue when this many consecutive missed or error check-ins are processed.",
       computedOptionalRequired: "computed",
@@ -97,7 +92,7 @@ export default {
     },
     {
       name: "max_runtime_minutes",
-      type: "int",
+      type: "int64",
       description:
         "Maximum runtime. The number of minutes before an in-progress check-in is marked timed out.",
       computedOptionalRequired: "computed",
@@ -105,7 +100,7 @@ export default {
     },
     {
       name: "recovery_threshold",
-      type: "int",
+      type: "int64",
       description:
         "Recovery Tolerance. Resolve the issue when this many consecutive healthy check-ins are processed. Either `crontab` or `interval_value` and `interval_unit` must be provided.",
       computedOptionalRequired: "computed",
@@ -127,7 +122,7 @@ export default {
         },
         {
           name: "interval_value",
-          type: "int",
+          type: "int64",
           description: "Interval value for the cron monitor.",
           computedOptionalRequired: "computed",
           skipFill: true,

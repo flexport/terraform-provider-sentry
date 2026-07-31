@@ -12,9 +12,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/statecheck"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
-	"github.com/jianyuan/go-utils/ptr"
 	"github.com/jianyuan/terraform-provider-sentry/internal/acctest"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentryclient"
 )
 
@@ -25,7 +25,7 @@ func init() {
 			ctx := context.Background()
 
 			params := &apiclient.ListOrganizationMonitorsParams{
-				Query: ptr.Ptr("!type:issue_stream type:uptime_domain_failure"),
+				Query: new("!type:issue_stream type:uptime_domain_failure"),
 			}
 
 			for {
@@ -93,7 +93,6 @@ func TestAccUptimeMonitorResource_validation(t *testing.T) {
 }
 
 func TestAccUptimeMonitorResource_basic(t *testing.T) {
-	teamName := acctest.RandomWithPrefix("tf-team")
 	projectName := acctest.RandomWithPrefix("tf-project")
 	monitorName := acctest.RandomWithPrefix("tf-uptime-monitor")
 	rn := "sentry_uptime_monitor.test"
@@ -113,7 +112,7 @@ func TestAccUptimeMonitorResource_basic(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccUptimeMonitorResourceConfig(teamName, projectName, monitorName, `
+				Config: testAccUptimeMonitorResourceConfig(projectName, monitorName, `
 					url = "https://sentry.io"
 					method = "GET"
 					interval_seconds = 60
@@ -138,7 +137,7 @@ func TestAccUptimeMonitorResource_basic(t *testing.T) {
 				),
 			},
 			{
-				Config: testAccUptimeMonitorResourceConfig(teamName, projectName, monitorName+"-updated", `
+				Config: testAccUptimeMonitorResourceConfig(projectName, monitorName+"-updated", `
 					url = "https://us.sentry.io"
 					method = "POST"
 					body = <<EOT
@@ -180,30 +179,45 @@ func TestAccUptimeMonitorResource_basic(t *testing.T) {
 			{
 				ResourceName:            rn,
 				ImportState:             true,
-				ImportStateIdFunc:       acctest.ThreePartImportStateIdFunc(rn, "organization", "project"),
+				ImportStateIdFunc:       resourceid.ImportState2PartIDFunc(rn, "organization", "id"),
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"body", "assertion_json"},
+				ImportStateVerifyIgnore: []string{"project", "body", "assertion_json"},
+			},
+			{
+				ResourceName: rn,
+				ImportState:  true,
+				ImportStateIdFunc: resourceid.ImportStateURL2PartIDFunc(
+					rn,
+					"https://{organization}.sentry.io/monitors/{id}/",
+					"organization", "organization",
+					"id", "id",
+				),
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"project", "body", "assertion_json"},
 			},
 		},
 	})
 }
 
-func testAccUptimeMonitorResourceConfig(teamName, projectName, name, extras string) string {
-	return testAccProjectResourceConfig(testAccProjectResourceConfigData{
-		TeamName:    teamName,
-		ProjectName: projectName,
-		Platform:    "go",
-	}) + fmt.Sprintf(`
-		resource "sentry_uptime_monitor" "test" {
-			organization = data.sentry_organization.test.slug
-			project      = sentry_project.test.slug
-			name         = "%[1]s"
+func testAccUptimeMonitorResourceConfig(projectName, name, extras string) string {
+	return fmt.Sprintf(`
+		resource "sentry_project" "test" {
+			organization = "%[1]s"
+			teams        = ["%[3]s"]
+			name         = "%[4]s"
+			platform     = "go"
+		}
 
-			%[2]s
+		resource "sentry_uptime_monitor" "test" {
+			organization = "%[1]s"
+			project      = sentry_project.test.slug
+			name         = "%[5]s"
+
+			%[6]s
 
 			owner = {
-				team_id = sentry_team.test.internal_id
+				team_id = "%[2]s"
 			}
 		}
-	`, name, extras)
+	`, acctest.TestOrganization, acctest.TestTeam.Id, acctest.TestTeam.Slug, projectName, name, extras)
 }

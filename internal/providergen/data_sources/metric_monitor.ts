@@ -1,13 +1,8 @@
-import dedent from "dedent";
 import type { DataSource } from "../schema";
 
 export default {
   name: "metric_monitor",
-  description: dedent.withOptions({ trimWhitespace: true })`
-      ⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.
-
-      Retrieve a Metric Monitor for a Project.
-    `,
+  description: "Retrieve a Metric Monitor for a Project.",
   api: {
     model: "ProjectMonitor",
     readStrategy: "simple",
@@ -125,7 +120,7 @@ export default {
     },
     {
       name: "time_window_seconds",
-      type: "int",
+      type: "int64",
       description: "The time window in seconds to use for the aggregate query.",
       computedOptionalRequired: "computed",
       skipFill: true,
@@ -154,7 +149,7 @@ export default {
         },
         {
           name: "comparison_delta",
-          type: "int",
+          type: "int64",
           description:
             "The comparison delta in seconds to use for the aggregate query. Only available for `percent` type.",
           computedOptionalRequired: "computed",
@@ -193,7 +188,7 @@ export default {
             },
             {
               name: "comparison",
-              type: "int",
+              type: "float64",
               description:
                 "The value to compare against. Only available for types other than `anomaly_detection`.",
               computedOptionalRequired: "computed",
@@ -217,7 +212,7 @@ export default {
             },
             {
               name: "condition_result",
-              type: "int",
+              type: "int64",
               description:
                 "When the condition is met, the result will be set to this value.",
               computedOptionalRequired: "computed",

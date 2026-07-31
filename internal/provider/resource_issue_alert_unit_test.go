@@ -7,55 +7,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentrytypes"
+	supertypes "github.com/orange-cloudavenue/terraform-plugin-framework-supertypes"
 )
-
-func TestIssueAlertResource_elemTypesInitialized(t *testing.T) {
-	if len(issueAlertConditionV2ElemType.AttrTypes) == 0 {
-		t.Fatal("issueAlertConditionV2ElemType was not initialized")
-	}
-	if len(issueAlertFilterV2ElemType.AttrTypes) == 0 {
-		t.Fatal("issueAlertFilterV2ElemType was not initialized")
-	}
-	if len(issueAlertActionV2ElemType.AttrTypes) == 0 {
-		t.Fatal("issueAlertActionV2ElemType was not initialized")
-	}
-}
-
-func TestIssueAlertModel_v2FieldsHandleUnknown(t *testing.T) {
-	model := IssueAlertModel{
-		ConditionsV2: types.ListUnknown(issueAlertConditionV2ElemType),
-		FiltersV2:    types.ListUnknown(issueAlertFilterV2ElemType),
-		ActionsV2:    types.ListUnknown(issueAlertActionV2ElemType),
-	}
-
-	if !model.ConditionsV2.IsUnknown() {
-		t.Error("expected ConditionsV2 to be unknown")
-	}
-	if !model.FiltersV2.IsUnknown() {
-		t.Error("expected FiltersV2 to be unknown")
-	}
-	if !model.ActionsV2.IsUnknown() {
-		t.Error("expected ActionsV2 to be unknown")
-	}
-}
-
-func TestIssueAlertModel_v2FieldsHandleNull(t *testing.T) {
-	model := IssueAlertModel{
-		ConditionsV2: types.ListNull(issueAlertConditionV2ElemType),
-		FiltersV2:    types.ListNull(issueAlertFilterV2ElemType),
-		ActionsV2:    types.ListNull(issueAlertActionV2ElemType),
-	}
-
-	if !model.ConditionsV2.IsNull() {
-		t.Error("expected ConditionsV2 to be null")
-	}
-	if !model.FiltersV2.IsNull() {
-		t.Error("expected FiltersV2 to be null")
-	}
-	if !model.ActionsV2.IsNull() {
-		t.Error("expected ActionsV2 to be null")
-	}
-}
 
 func TestIssueAlertConditionModel_ToApi_emptyElement(t *testing.T) {
 	model := IssueAlertConditionModel{}
@@ -111,50 +64,11 @@ func TestIssueAlertActionModel_ToApi_emptyElement(t *testing.T) {
 	}
 }
 
-func TestIssueAlertConditionModel_ToApi_validCondition(t *testing.T) {
-	model := IssueAlertConditionModel{
-		FirstSeenEvent: &IssueAlertConditionFirstSeenEventModel{},
-	}
-	result, diags := model.ToApi(context.Background())
-	if diags.HasError() {
-		t.Fatalf("unexpected error: %s", diags)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-}
-
-func TestIssueAlertFilterModel_ToApi_validFilter(t *testing.T) {
-	model := IssueAlertFilterModel{
-		LatestRelease: &IssueAlertFilterLatestReleaseModel{},
-	}
-	result, diags := model.ToApi(context.Background())
-	if diags.HasError() {
-		t.Fatalf("unexpected error: %s", diags)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-}
-
-func TestIssueAlertActionModel_ToApi_validAction(t *testing.T) {
-	model := IssueAlertActionModel{
-		NotifyEvent: &IssueAlertActionNotifyEventModel{},
-	}
-	result, diags := model.ToApi(context.Background())
-	if diags.HasError() {
-		t.Fatalf("unexpected error: %s", diags)
-	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
-	}
-}
-
 func TestIssueAlertActionSlackNotifyServiceModel_ToApi_withChannelId(t *testing.T) {
 	channelId := "C1234567890"
 	model := IssueAlertActionSlackNotifyServiceModel{
 		Workspace: types.StringValue("ws123"),
-		Channel:   sentrytypes.SlackChannelValue("#general"),
+		Channel:   sentrytypes.NewSlackChannelValue("#general"),
 		ChannelId: types.StringValue(channelId),
 	}
 	result, diags := model.ToApi(context.Background())
@@ -173,7 +87,7 @@ func TestIssueAlertActionSlackNotifyServiceModel_ToApi_withChannelId(t *testing.
 func TestIssueAlertActionSlackNotifyServiceModel_ToApi_withoutChannelId(t *testing.T) {
 	model := IssueAlertActionSlackNotifyServiceModel{
 		Workspace: types.StringValue("ws123"),
-		Channel:   sentrytypes.SlackChannelValue("#general"),
+		Channel:   sentrytypes.NewSlackChannelValue("#general"),
 		ChannelId: types.StringNull(),
 	}
 	result, diags := model.ToApi(context.Background())
@@ -222,8 +136,8 @@ func TestSlackChannel_SemanticEquals_ignoresHashPrefix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := sentrytypes.SlackChannelValue(tt.a)
-			b := sentrytypes.SlackChannelValue(tt.b)
+			a := sentrytypes.NewSlackChannelValue(tt.a)
+			b := sentrytypes.NewSlackChannelValue(tt.b)
 			result, diags := a.StringSemanticEquals(context.Background(), b)
 			if diags.HasError() {
 				t.Fatalf("unexpected error: %s", diags)
@@ -284,6 +198,84 @@ func TestReorderToMatchPrior_handlesDuplicateTypes(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("index %d: got %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+// nullActionModel returns an IssueAlertActionModel with every action variant
+// set to null, so a caller can populate exactly one variant.
+func nullActionModel(ctx context.Context) IssueAlertActionModel {
+	return IssueAlertActionModel{
+		NotifyEmail:                  supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionNotifyEmailModel](ctx),
+		NotifyEvent:                  supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionNotifyEventModel](ctx),
+		NotifyEventService:           supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionNotifyEventServiceModel](ctx),
+		NotifyEventSentryApp:         supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionNotifyEventSentryAppModel](ctx),
+		OpsgenieNotifyTeam:           supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionOpsgenieNotifyTeam](ctx),
+		PagerDutyNotifyService:       supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionPagerDutyNotifyServiceModel](ctx),
+		SlackNotifyService:           supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionSlackNotifyServiceModel](ctx),
+		MsTeamsNotifyService:         supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionMsTeamsNotifyServiceModel](ctx),
+		DiscordNotifyService:         supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionDiscordNotifyServiceModel](ctx),
+		JiraCreateTicket:             supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionJiraCreateTicketModel](ctx),
+		JiraServerCreateTicket:       supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionJiraServerCreateTicketModel](ctx),
+		GitHubCreateTicket:           supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionGitHubCreateTicketModel](ctx),
+		GitHubEnterpriseCreateTicket: supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionGitHubEnterpriseCreateTicketModel](ctx),
+		AzureDevopsCreateTicket:      supertypes.NewSingleNestedObjectValueOfNull[IssueAlertActionAzureDevopsCreateTicketModel](ctx),
+	}
+}
+
+func slackAction(ctx context.Context, workspace, channel string) IssueAlertActionModel {
+	m := nullActionModel(ctx)
+	m.SlackNotifyService = supertypes.NewSingleNestedObjectValueOf(ctx, &IssueAlertActionSlackNotifyServiceModel{
+		Name:      types.StringNull(),
+		Workspace: types.StringValue(workspace),
+		Channel:   sentrytypes.NewSlackChannelValue(channel),
+		ChannelId: types.StringValue("C123"),
+		Tags:      sentrytypes.StringSetNull(),
+		Notes:     types.StringNull(),
+	})
+	return m
+}
+
+// A slack_notify_service action key must ignore a leading "#" on the channel,
+// matching sentrytypes.SlackChannel's StringSemanticEquals. Sentry returns the
+// channel without the "#", so without this the prior and incoming keys diverge
+// and reorderToMatchPrior cannot pair them.
+func TestIssueAlertActionModelKey_slackChannelIgnoresHashPrefix(t *testing.T) {
+	ctx := context.Background()
+	key := issueAlertActionModelKey(ctx)
+
+	withHash := key(slackAction(ctx, "ws123", "#errors-prod"))
+	withoutHash := key(slackAction(ctx, "ws123", "errors-prod"))
+
+	if withHash != withoutHash {
+		t.Errorf("slack action key should ignore leading '#': %q != %q", withHash, withoutHash)
+	}
+}
+
+// End-to-end: when Sentry reorders actions AND returns channels without the
+// "#", reorderToMatchPrior must still restore the prior order.
+func TestReorderToMatchPrior_slackActionsWithNormalizedChannel(t *testing.T) {
+	ctx := context.Background()
+	keyFn := issueAlertActionModelKey(ctx)
+
+	prior := []IssueAlertActionModel{
+		slackAction(ctx, "A", "#errors-prod"),
+		slackAction(ctx, "B", "#errors-staging"),
+	}
+	// Sentry: reordered, and "#" stripped.
+	incoming := []IssueAlertActionModel{
+		slackAction(ctx, "B", "errors-staging"),
+		slackAction(ctx, "A", "errors-prod"),
+	}
+
+	got := reorderToMatchPrior(prior, incoming, keyFn)
+	if len(got) != 2 {
+		t.Fatalf("len mismatch: got %d, want 2", len(got))
+	}
+	if ws := got[0].SlackNotifyService.MustGet(ctx).Workspace.ValueString(); ws != "A" {
+		t.Errorf("index 0: got workspace %q, want A", ws)
+	}
+	if ws := got[1].SlackNotifyService.MustGet(ctx).Workspace.ValueString(); ws != "B" {
+		t.Errorf("index 1: got workspace %q, want B", ws)
 	}
 }
 

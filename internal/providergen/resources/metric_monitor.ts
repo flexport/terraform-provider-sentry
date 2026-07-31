@@ -4,8 +4,6 @@ import type { Resource } from "../schema";
 export default {
   name: "metric_monitor",
   description: dedent.withOptions({ trimWhitespace: true })`
-      ⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.
-
       Create a Metric Monitor for a Project.
 
       For more information about configuring metric monitors, see [Create a Monitor for a Project](https://docs.sentry.io/api/monitors/create-a-monitor-for-a-project/).
@@ -24,7 +22,10 @@ export default {
   generate: {
     modelFillers: false,
   },
-  importStateAttributes: ["organization", "project", "id"],
+  import: {
+    url: "https://{organization}.sentry.io/monitors/{id}/",
+    targetAttributes: ["organization", "id"],
+  },
   attributes: [
     {
       name: "id",
@@ -132,7 +133,7 @@ export default {
       type: "string",
       description:
         "An event search query to subscribe to and monitor for alerts. For example, to filter transactions so that only those with status code 400 are included, you could use `http.status_code:400`.",
-      computedOptionalRequired: "optional",
+      computedOptionalRequired: "computed_optional",
     },
     {
       name: "query_type",
@@ -141,10 +142,11 @@ export default {
         "The type of query. If no value is provided, `query_type` is set to the default for the specified `dataset.`",
       computedOptionalRequired: "computed_optional",
       enum: "sentrydata.SnubaQueryTypes",
+      planModifiers: ["stringplanmodifier.UseStateForUnknown()"],
     },
     {
       name: "time_window_seconds",
-      type: "int",
+      type: "int64",
       description: "The time window in seconds to use for the aggregate query.",
       computedOptionalRequired: "computed_optional",
     },
@@ -171,7 +173,7 @@ export default {
         },
         {
           name: "comparison_delta",
-          type: "int",
+          type: "int64",
           description:
             "The comparison delta in seconds to use for the aggregate query. Only required for `percent` type.",
           computedOptionalRequired: "optional",
@@ -212,13 +214,13 @@ export default {
             },
             {
               name: "comparison",
-              type: "int",
+              type: "float64",
               description:
                 "The value to compare against. Only required for types other than `anomaly_detection`.",
               computedOptionalRequired: "optional",
               validators: [
-                `fint64validator.NullIfAttributeIsOneOf(path.MatchRelative().AtParent().AtName("type"), []attr.Value{supertypes.NewStringValue("anomaly_detection")})`,
-                `fint64validator.RequireIfAttributeIsOneOf(path.MatchRelative().AtParent().AtName("type"), []attr.Value{supertypes.NewStringValue("eq"), supertypes.NewStringValue("gte"), supertypes.NewStringValue("gt"), supertypes.NewStringValue("lte"), supertypes.NewStringValue("lt"), supertypes.NewStringValue("ne")})`,
+                `tfutils.NullIfAttributeIsOneOfFloat64(path.MatchRelative().AtParent().AtName("type"), []attr.Value{supertypes.NewStringValue("anomaly_detection")})`,
+                `tfutils.RequireIfAttributeIsOneOfFloat64(path.MatchRelative().AtParent().AtName("type"), []attr.Value{supertypes.NewStringValue("eq"), supertypes.NewStringValue("gte"), supertypes.NewStringValue("gt"), supertypes.NewStringValue("lte"), supertypes.NewStringValue("lt"), supertypes.NewStringValue("ne")})`,
               ],
             },
             {
@@ -245,7 +247,7 @@ export default {
             },
             {
               name: "condition_result",
-              type: "int",
+              type: "int64",
               description:
                 "When the condition is met, the result will be set to this value.",
               computedOptionalRequired: "required",

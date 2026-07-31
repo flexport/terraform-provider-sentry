@@ -4,6 +4,16 @@ import type { DataSource, Attribute, Resource } from "./schema";
 import { match, P } from "ts-pattern";
 import { parseArgs } from "util";
 import dedent from "dedent";
+import {
+  modelType,
+  tfAttributeType,
+  tfAttributeValueType,
+  tfEnumWrapperFunction,
+  tfPlanModifierType,
+  tfSchemaAttributeType,
+  tfValidatorType,
+} from "./go-types";
+import { tfAttributeDescription } from "./tf-utils";
 
 function generateTerraformAttribute({
   parent,
@@ -12,341 +22,91 @@ function generateTerraformAttribute({
   parent: string;
   attribute: Attribute;
 }) {
-  let description = attribute.description;
-  if (attribute.deprecationMessage) {
-    description += ` **Deprecated** ${attribute.deprecationMessage}`;
+  const parts: string[] = [];
+
+  if (attribute.enum) {
+    parts.push(`${tfEnumWrapperFunction(attribute)}(`);
   }
 
-  const commonParts: string[] = [];
-  commonParts.push(`MarkdownDescription: ${JSON.stringify(description)},`);
+  parts.push(`${tfSchemaAttributeType({ type: attribute.type })}{`);
+
+  parts.push(
+    `MarkdownDescription: ${JSON.stringify(tfAttributeDescription(attribute))},`,
+  );
+
   if (attribute.deprecationMessage) {
-    commonParts.push(
+    parts.push(
       `DeprecationMessage: ${JSON.stringify(attribute.deprecationMessage)},`,
     );
   }
-  commonParts.push(
-    match(attribute.computedOptionalRequired)
-      .with("required", () => "Required: true,")
-      .with("computed", () => "Computed: true,")
-      .with("computed_optional", () => "Optional: true,\nComputed: true,")
-      .with("optional", () => "Optional: true,")
+
+  parts.push(
+    ...match(attribute.computedOptionalRequired)
+      .with("required", () => ["Required: true,"])
+      .with("computed", () => ["Computed: true,"])
+      .with("computed_optional", () => ["Optional: true,", "Computed: true,"])
+      .with("optional", () => ["Optional: true,"])
       .exhaustive(),
   );
+
   if (attribute.sensitive) {
-    commonParts.push("Sensitive: true,");
+    parts.push("Sensitive: true,");
   }
+
   if (attribute.default) {
-    commonParts.push(`Default: ${attribute.default},`);
+    parts.push(`Default: ${attribute.default},`);
   }
 
-  function resolveCustomType(original: string) {
-    if (attribute.customType) {
-      return attribute.customType.type;
-    } else {
-      return original;
+  parts.push(`CustomType: ${tfAttributeType(attribute, parent)},`);
+
+  if (attribute.validators) {
+    parts.push(`Validators: []${tfValidatorType({ type: attribute.type })}{`);
+    parts.push(...attribute.validators.map((validator) => `${validator},`));
+    parts.push("},");
+  }
+
+  if (attribute.planModifiers) {
+    parts.push(
+      `PlanModifiers: []${tfPlanModifierType({ type: attribute.type })}{`,
+    );
+    parts.push(...attribute.planModifiers.map((modifier) => `${modifier},`));
+    parts.push("},");
+  }
+
+  if (attribute.type === "list_nested" || attribute.type === "set_nested") {
+    parts.push("NestedObject: schema.NestedAttributeObject{");
+  }
+
+  if (
+    attribute.type === "list_nested" ||
+    attribute.type === "set_nested" ||
+    attribute.type === "single_nested"
+  ) {
+    parts.push("Attributes: map[string]schema.Attribute{");
+    for (const nestedAttribute of attribute.attributes) {
+      parts.push(
+        `"${nestedAttribute.name}": ${generateTerraformAttribute({
+          parent: modelType(attribute, parent),
+          attribute: nestedAttribute,
+        })},`,
+      );
     }
+    parts.push("},");
   }
 
-  return match(attribute)
-    .with({ type: "string" }, () => {
-      const parts: string[] = [];
-      if (attribute.enum) {
-        parts.push("tfutils.WithEnumStringAttribute(");
-      }
-      parts.push("schema.StringAttribute{");
-      parts.push(...commonParts);
-      parts.push(
-        `CustomType: ${resolveCustomType("supertypes.StringType{}")},`,
-      );
-      if (attribute.validators) {
-        parts.push("Validators: []validator.String{");
-        parts.push(...attribute.validators.map((validator) => `${validator},`));
-        parts.push("},");
-      }
-      if (attribute.planModifiers) {
-        parts.push("PlanModifiers: []planmodifier.String{");
-        parts.push(
-          ...attribute.planModifiers.map((modifier) => `${modifier},`),
-        );
-        parts.push("},");
-      }
-      if (attribute.enum) {
-        parts.push("},");
-        parts.push(`${attribute.enum},`);
-        parts.push(")");
-      } else {
-        parts.push("}");
-      }
-      return parts.join("\n");
-    })
-    .with({ type: "int" }, (attribute) => {
-      const parts: string[] = [];
-      if (attribute.enum) {
-        parts.push("tfutils.WithEnumInt64Attribute(");
-      }
-      parts.push("schema.Int64Attribute{");
-      parts.push(...commonParts);
-      parts.push(`CustomType: ${resolveCustomType("supertypes.Int64Type{}")},`);
-      if (attribute.validators) {
-        parts.push("Validators: []validator.Int64{");
-        parts.push(...attribute.validators.map((validator) => `${validator},`));
-        parts.push("},");
-      }
-      if (attribute.planModifiers) {
-        parts.push("PlanModifiers: []planmodifier.Int64{");
-        parts.push(
-          ...attribute.planModifiers.map((modifier) => `${modifier},`),
-        );
-        parts.push("},");
-      }
-      if (attribute.enum) {
-        parts.push("},");
-        parts.push(`${attribute.enum},`);
-        parts.push(")");
-      } else {
-        parts.push("}");
-      }
-      return parts.join("\n");
-    })
-    .with({ type: "bool" }, () => {
-      const parts: string[] = [];
-      parts.push("schema.BoolAttribute{");
-      parts.push(...commonParts);
-      parts.push(`CustomType: ${resolveCustomType("supertypes.BoolType{}")},`);
-      if (attribute.validators) {
-        parts.push("Validators: []validator.Bool{");
-        parts.push(...attribute.validators.map((validator) => `${validator},`));
-        parts.push("},");
-      }
-      if (attribute.planModifiers) {
-        parts.push("PlanModifiers: []planmodifier.Bool{");
-        parts.push(
-          ...attribute.planModifiers.map((modifier) => `${modifier},`),
-        );
-        parts.push("},");
-      }
-      parts.push("}");
-      return parts.join("\n");
-    })
-    .with({ type: "list", elementType: "string" }, (attribute) => {
-      const parts: string[] = [];
-      parts.push("schema.ListAttribute{");
-      parts.push(...commonParts);
-      parts.push(
-        `CustomType: ${resolveCustomType("supertypes.NewListTypeOf[string](ctx)")},`,
-      );
-      if (attribute.validators) {
-        parts.push("Validators: []validator.List{");
-        parts.push(...attribute.validators.map((validator) => `${validator},`));
-        parts.push("},");
-      }
-      if (attribute.planModifiers) {
-        parts.push("PlanModifiers: []planmodifier.List{");
-        parts.push(
-          ...attribute.planModifiers.map((modifier) => `${modifier},`),
-        );
-        parts.push("},");
-      }
-      parts.push("}");
-      return parts.join("\n");
-    })
-    .with({ type: "list_nested" }, (attribute) => {
-      const parts: string[] = [];
-      parts.push("schema.ListNestedAttribute{");
-      parts.push(...commonParts);
-      parts.push(
-        `CustomType: ${resolveCustomType(
-          `supertypes.NewListNestedObjectTypeOf[${parent}${camelize(
-            attribute.name,
-          )}Item](ctx)`,
-        )},`,
-      );
-      if (attribute.validators) {
-        parts.push("Validators: []validator.List{");
-        parts.push(...attribute.validators.map((validator) => `${validator},`));
-        parts.push("},");
-      }
-      parts.push("NestedObject: schema.NestedAttributeObject{");
-      parts.push("Attributes: map[string]schema.Attribute{");
-      for (const nestedAttribute of attribute.attributes) {
-        parts.push(
-          `"${nestedAttribute.name}": ${generateTerraformAttribute({
-            parent: `${parent}${camelize(attribute.name)}Item`,
-            attribute: nestedAttribute,
-          })},`,
-        );
-      }
-      parts.push("},");
-      parts.push("},");
-      parts.push("}");
-      return parts.join("\n");
-    })
-    .with({ type: "set", elementType: "string" }, (attribute) => {
-      const parts: string[] = [];
-      if (attribute.enum) {
-        parts.push("tfutils.WithEnumSetAttributeStringElements(");
-      }
-      parts.push("schema.SetAttribute{");
-      parts.push(...commonParts);
-      parts.push(
-        `CustomType: ${resolveCustomType(
-          "supertypes.NewSetTypeOf[string](ctx)",
-        )},`,
-      );
-      if (attribute.validators) {
-        parts.push("Validators: []validator.Set{");
-        parts.push(...attribute.validators.map((validator) => `${validator},`));
-        parts.push("},");
-      }
-      if (attribute.planModifiers) {
-        parts.push("PlanModifiers: []planmodifier.Set{");
-        parts.push(
-          ...attribute.planModifiers.map((modifier) => `${modifier},`),
-        );
-        parts.push("},");
-      }
-      if (attribute.enum) {
-        parts.push("},");
-        parts.push(`${attribute.enum},`);
-        parts.push(")");
-      } else {
-        parts.push("}");
-      }
-      return parts.join("\n");
-    })
-    .with({ type: "set_nested" }, (attribute) => {
-      const parts: string[] = [];
-      parts.push("schema.SetNestedAttribute{");
-      parts.push(...commonParts);
-      parts.push(
-        `CustomType: ${resolveCustomType(
-          `supertypes.NewSetNestedObjectTypeOf[${parent}${camelize(
-            attribute.name,
-          )}Item](ctx)`,
-        )},`,
-      );
-      if (attribute.validators) {
-        parts.push("Validators: []validator.Set{");
-        parts.push(...attribute.validators.map((validator) => `${validator},`));
-        parts.push("},");
-      }
-      parts.push("NestedObject: schema.NestedAttributeObject{");
-      parts.push("Attributes: map[string]schema.Attribute{");
-      for (const nestedAttribute of attribute.attributes) {
-        parts.push(
-          `"${nestedAttribute.name}": ${generateTerraformAttribute({
-            parent: `${parent}${camelize(attribute.name)}Item`,
-            attribute: nestedAttribute,
-          })},`,
-        );
-      }
-      parts.push("},");
-      parts.push("},");
-      parts.push("}");
-      return parts.join("\n");
-    })
-    .with({ type: "single_nested" }, (attribute) => {
-      const parts: string[] = [];
-      parts.push("schema.SingleNestedAttribute{");
-      parts.push(...commonParts);
-      parts.push(
-        `CustomType: ${resolveCustomType(
-          `supertypes.NewSingleNestedObjectTypeOf[${parent}${camelize(
-            attribute.name,
-          )}](ctx)`,
-        )},`,
-      );
-      if (attribute.validators) {
-        parts.push("Validators: []validator.Object{");
-        parts.push(...attribute.validators.map((validator) => `${validator},`));
-        parts.push("},");
-      }
-      parts.push("Attributes: map[string]schema.Attribute{");
-      for (const nestedAttribute of attribute.attributes) {
-        parts.push(
-          `"${nestedAttribute.name}": ${generateTerraformAttribute({
-            parent: `${parent}${camelize(attribute.name)}`,
-            attribute: nestedAttribute,
-          })},`,
-        );
-      }
-      parts.push("},");
-      parts.push("}");
-      return parts.join("\n");
-    })
-    .with({ type: "map" }, (attribute) => {
-      const parts: string[] = [];
-      parts.push("schema.MapAttribute{");
-      parts.push(...commonParts);
-      parts.push(
-        `CustomType: ${resolveCustomType(
-          "supertypes.NewMapTypeOf[string](ctx)",
-        )},`,
-      );
-      if (attribute.validators) {
-        parts.push("Validators: []validator.Map{");
-        parts.push(...attribute.validators.map((validator) => `${validator},`));
-        parts.push("},");
-      }
-      if (attribute.planModifiers) {
-        parts.push("PlanModifiers: []planmodifier.Map{");
-        parts.push(
-          ...attribute.planModifiers.map((modifier) => `${modifier},`),
-        );
-        parts.push("},");
-      }
-      parts.push("}");
-      return parts.join("\n");
-    })
-    .exhaustive();
-}
+  if (attribute.type === "list_nested" || attribute.type === "set_nested") {
+    parts.push("},");
+  }
 
-function generateTerraformValueType({
-  parent,
-  attribute,
-}: {
-  parent: string;
-  attribute: Attribute;
-}) {
-  return match(attribute)
-    .with(
-      { customType: { value: P.any } },
-      (attribute) => attribute.customType.value,
-    )
-    .with({ type: "string" }, () => "supertypes.StringValue")
-    .with({ type: "int" }, () => "supertypes.Int64Value")
-    .with({ type: "bool" }, () => "supertypes.BoolValue")
-    .with(
-      { type: "list", elementType: "string" },
-      () => "supertypes.ListValueOf[string]",
-    )
-    .with(
-      { type: "list_nested" },
-      () =>
-        `supertypes.ListNestedObjectValueOf[${parent}${camelize(
-          attribute.name,
-        )}Item]`,
-    )
-    .with(
-      { type: "set", elementType: "string" },
-      () => "supertypes.SetValueOf[string]",
-    )
-    .with(
-      { type: "set_nested" },
-      () =>
-        `supertypes.SetNestedObjectValueOf[${parent}${camelize(
-          attribute.name,
-        )}Item]`,
-    )
-    .with(
-      { type: "single_nested" },
-      () =>
-        `supertypes.SingleNestedObjectValueOf[${parent}${camelize(
-          attribute.name,
-        )}]`,
-    )
-    .with({ type: "map" }, () => "supertypes.MapValueOf[string]")
-    .exhaustive();
+  if (attribute.enum) {
+    parts.push("},");
+    parts.push(`${attribute.enum},`);
+    parts.push(")");
+  } else {
+    parts.push("}");
+  }
+
+  return parts.join("\n");
 }
 
 function generateTerraformToPrimitive({
@@ -359,7 +119,8 @@ function generateTerraformToPrimitive({
   const srcVarName = `${srcVar}.${camelize(attribute.name)}`;
   return match(attribute)
     .with({ type: "string" }, () => `${srcVarName}.ValueString()`)
-    .with({ type: "int" }, () => `${srcVarName}.ValueInt64()`)
+    .with({ type: "int64" }, () => `${srcVarName}.ValueInt64()`)
+    .with({ type: "float64" }, () => `${srcVarName}.ValueFloat64()`)
     .with({ type: "bool" }, () => `${srcVarName}.ValueBool()`)
     .exhaustive();
 }
@@ -408,37 +169,41 @@ function generatePrimitiveToTerraform({
       () => `${destVarName} = supertypes.NewStringValue(${srcVarName})`,
     )
     .with(
-      { type: "int" },
+      { type: "int64" },
       () => `${destVarName} = supertypes.NewInt64Value(${srcVarName})`,
+    )
+    .with(
+      { type: "float64" },
+      () => `${destVarName} = types.Float64Value(${srcVarName})`,
     )
     .with(
       { type: "bool" },
       () => `${destVarName} = supertypes.NewBoolValue(${srcVarName})`,
     )
     .with(
-      { type: "list", elementType: "string" },
+      { type: "list" },
       () =>
         `${destVarName} = supertypes.NewListValueOfSlice(ctx, ${srcVarName})`,
     )
     .with(
       { type: "list_nested" },
       (attribute) =>
-        `${destVarName} = supertypes.NewListNestedObjectValueOfValueSlice(ctx, lo.Map(${srcVarName}, func(item apiclient.${attribute.model}, _ int) ${name}${camelize(attribute.name)}Item {
-          var model ${name}${camelize(attribute.name)}Item
+        `${destVarName} = supertypes.NewListNestedObjectValueOfValueSlice(ctx, lo.Map(${srcVarName}, func(item apiclient.${attribute.model}, _ int) ${modelType(attribute, name)} {
+          var model ${modelType(attribute, name)}
           diags.Append(model.Fill(ctx, item)...)
           return model
         }))`,
     )
     .with(
-      { type: "set", elementType: "string" },
+      { type: "set" },
       () =>
         `${destVarName} = supertypes.NewSetValueOfSlice(ctx, ${srcVarName})`,
     )
     .with(
       { type: "set_nested" },
       (attribute) =>
-        `${destVarName} = supertypes.NewSetNestedObjectValueOfValueSlice(ctx, lo.Map(${srcVarName}, func(item apiclient.${attribute.model}, _ int) ${name}${camelize(attribute.name)}Item {
-          var model ${name}${camelize(attribute.name)}Item
+        `${destVarName} = supertypes.NewSetNestedObjectValueOfValueSlice(ctx, lo.Map(${srcVarName}, func(item apiclient.${attribute.model}, _ int) ${modelType(attribute, name)} {
+          var model ${modelType(attribute, name)}
           diags.Append(model.Fill(ctx, item)...)
           return model
         }))`,
@@ -463,10 +228,7 @@ function generateModel({
 
   for (const attribute of attributes) {
     structLines.push(
-      `${camelize(attribute.name)} ${generateTerraformValueType({
-        parent: name,
-        attribute,
-      })} \`tfsdk:"${attribute.name}"\``,
+      `${camelize(attribute.name)} ${tfAttributeValueType(attribute, name)} \`tfsdk:"${attribute.name}"\``,
     );
 
     if (attribute.customFill) {
@@ -486,22 +248,19 @@ function generateModel({
 
     extras.push(
       ...match(attribute)
-        .with({ type: "list_nested" }, { type: "set_nested" }, (attribute) => [
-          generateModel({
-            name: `${name}${camelize(attribute.name)}Item`,
-            attributes: attribute.attributes,
-            srcModel: `apiclient.${attribute.model}`,
-            generateFillers: generateFillers && !attribute.skipFill,
-          }),
-        ])
-        .with({ type: "single_nested" }, (attribute) => [
-          generateModel({
-            name: `${name}${camelize(attribute.name)}`,
-            attributes: attribute.attributes,
-            srcModel: `apiclient.${attribute.model}`, // TODO: attribute.model unused
-            generateFillers: generateFillers && !attribute.skipFill,
-          }),
-        ])
+        .with(
+          { type: "list_nested" },
+          { type: "set_nested" },
+          { type: "single_nested" },
+          (attribute) => [
+            generateModel({
+              name: modelType(attribute, name),
+              attributes: attribute.attributes,
+              srcModel: `apiclient.${attribute.model}`,
+              generateFillers: generateFillers && !attribute.skipFill,
+            }),
+          ],
+        )
         .otherwise(() => []),
     );
   }
@@ -534,7 +293,11 @@ function generateDataSourceModel({ dataSource }: { dataSource: DataSource }) {
   const modelName = `${camelize(dataSource.name)}DataSourceModel`;
   const srcModel = match(dataSource.api)
     .with({ readStrategy: "paginate" }, (api) => `[]apiclient.${api.model}`)
-    .with({ readStrategy: "simple" }, (api) => `apiclient.${api.model}`)
+    .with(
+      { readStrategy: "simple" },
+      { readStrategy: "custom" },
+      (api) => `apiclient.${api.model}`,
+    )
     .exhaustive();
   return generateModel({
     name: modelName,
@@ -617,6 +380,7 @@ function generateDataSource({ dataSource }: { dataSource: DataSource }) {
         }
         return parts;
       })
+      .with({ readStrategy: "custom" }, () => [])
       .exhaustive(),
   );
 
@@ -676,6 +440,15 @@ function generateDataSource({ dataSource }: { dataSource: DataSource }) {
     }
 
     resp.Diagnostics.Append(data.Fill(ctx, *httpResp.JSON200)...)
+    if resp.Diagnostics.HasError() {
+      return
+    }
+    `,
+    )
+    .with(
+      { readStrategy: "custom" },
+      () => `
+    resp.Diagnostics.Append(d.read(ctx, &data)...)
     if resp.Diagnostics.HasError() {
       return
     }
@@ -863,11 +636,12 @@ import (
   supertypes "github.com/orange-cloudavenue/terraform-plugin-framework-supertypes"
   fint64validator "github.com/orange-cloudavenue/terraform-plugin-framework-validators/int64validator"
   fstringvalidator "github.com/orange-cloudavenue/terraform-plugin-framework-validators/stringvalidator"
+  intresource "github.com/jianyuan/terraform-provider-sentry/internal/resource"
 )
 
 var _ resource.Resource = &${resourceName}{}
 ${
-  resource.importStateAttributes
+  resource.import
     ? `var _ resource.ResourceWithImportState = &${resourceName}{}`
     : ""
 }
@@ -1104,43 +878,79 @@ func (r *${resourceName}) Delete(ctx context.Context, req resource.DeleteRequest
   }
 }
 
-${match(resource.importStateAttributes)
-  .with([P.any], (attributes) => {
-    return `
+${match(resource.import)
+  .with(
+    { url: P.nonNullable, targetAttributes: [P.any] },
+    ({ url, targetAttributes }) => {
+      return `
         func (r *${resourceName}) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-          resource.ImportStatePassthroughID(ctx, path.Root("${attributes[0]}"), req, resp)
+          intresource.ImportState1Part(
+            "${url}",
+            "${targetAttributes[0]}", "${targetAttributes[0]}",
+          )(ctx, req, resp)
         }
       `;
-  })
-  .with([P.any, P.any], (attributes) => {
-    return `
+    },
+  )
+  .with(
+    { url: P.nullish, targetAttributes: [P.any] },
+    ({ targetAttributes }) => {
+      return `
         func (r *${resourceName}) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-          ${camelize(attributes[0], true)}, ${camelize(attributes[1], true)}, err := tfutils.SplitTwoPartId(req.ID, "${attributes[0]}", "${attributes[1]}")
-          if err != nil {
-            resp.Diagnostics.AddError("Invalid ID", fmt.Sprintf("Error parsing ID: %s", err.Error()))
-            return
-          }
-
-          resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("${attributes[0]}"), ${camelize(attributes[0], true)})...)
-          resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("${attributes[1]}"), ${camelize(attributes[1], true)})...)
+          intresource.ImportState1PartPassthrough("${targetAttributes[0]}")(ctx, req, resp)
         }
       `;
-  })
-  .with([P.any, P.any, P.any], (attributes) => {
-    return `
+    },
+  )
+  .with(
+    { url: P.nonNullable, targetAttributes: [P.any, P.any] },
+    ({ url, targetAttributes }) => {
+      return `
         func (r *${resourceName}) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
-          ${camelize(attributes[0], true)}, ${camelize(attributes[1], true)}, ${camelize(attributes[2], true)}, err := tfutils.SplitThreePartId(req.ID, "${attributes[0]}", "${attributes[1]}", "${attributes[2]}")
-          if err != nil {
-            resp.Diagnostics.AddError("Invalid ID", fmt.Sprintf("Error parsing ID: %s", err.Error()))
-            return
-          }
-
-          resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("${attributes[0]}"), ${camelize(attributes[0], true)})...)
-          resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("${attributes[1]}"), ${camelize(attributes[1], true)})...)
-          resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("${attributes[2]}"), ${camelize(attributes[2], true)})...)
+          intresource.ImportState2Part(
+            "${url}",
+            "${targetAttributes[0]}", "${targetAttributes[0]}",
+            "${targetAttributes[1]}", "${targetAttributes[1]}",
+          )(ctx, req, resp)
         }
       `;
-  })
+    },
+  )
+  .with(
+    { url: P.nullish, targetAttributes: [P.any, P.any] },
+    ({ targetAttributes }) => {
+      return `
+        func (r *${resourceName}) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+          intresource.ImportState2PartPath("${targetAttributes[0]}", "${targetAttributes[1]}")(ctx, req, resp)
+        }
+      `;
+    },
+  )
+  .with(
+    { url: P.nonNullable, targetAttributes: [P.any, P.any, P.any] },
+    ({ url, targetAttributes }) => {
+      return `
+        func (r *${resourceName}) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+          intresource.ImportState3Part(
+            "${url}",
+            "${targetAttributes[0]}", "${targetAttributes[0]}",
+            "${targetAttributes[1]}", "${targetAttributes[1]}",
+            "${targetAttributes[2]}", "${targetAttributes[2]}",
+          )(ctx, req, resp)
+        }
+      `;
+    },
+  )
+  .with(
+    { url: P.nullish, targetAttributes: [P.any, P.any, P.any] },
+    ({ targetAttributes }) => {
+      return `
+        func (r *${resourceName}) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+          intresource.ImportState3PartPath("${targetAttributes[0]}", "${targetAttributes[1]}", "${targetAttributes[2]}")(ctx, req, resp)
+        }
+      `;
+    },
+  )
   .otherwise(() => "")}
 
 ${generateResourceModel({ resource })}

@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -14,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 	"github.com/jianyuan/terraform-provider-sentry/internal/acctest"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentryclient"
 )
 
@@ -24,6 +26,7 @@ func init() {
 			ctx := context.Background()
 
 			params := &apiclient.ListOrganizationWorkflowsParams{}
+			workflows := []apiclient.OrganizationWorkflow{}
 
 			for {
 				listHttpResp, err := acctest.SharedApiClient.ListOrganizationWorkflowsWithResponse(ctx, acctest.TestOrganization, params)
@@ -34,10 +37,23 @@ func init() {
 				}
 
 				for _, workflow := range *listHttpResp.JSON200 {
-					if !strings.HasPrefix(workflow.Name, "tf-alert") {
+					if !strings.HasPrefix(workflow.Name, "tf-alert") && workflow.Name != "Send a notification for high priority issues" {
 						continue
 					}
 
+					workflows = append(workflows, workflow)
+				}
+
+				params.Cursor = sentryclient.ParseNextPaginationCursor(listHttpResp.HTTPResponse)
+				if params.Cursor == nil {
+					break
+				}
+			}
+
+			var wg sync.WaitGroup
+
+			for _, workflow := range workflows {
+				wg.Go(func() {
 					deleteHttpResp, err := acctest.SharedApiClient.DeleteOrganizationWorkflowWithResponse(ctx, acctest.TestOrganization, workflow.Id)
 					if err != nil {
 						log.Printf("[ERROR] Failed to delete alert: %s", err)
@@ -46,13 +62,10 @@ func init() {
 					} else {
 						log.Printf("[INFO] Deleted alert: %s (ID: %s)", workflow.Name, workflow.Id)
 					}
-				}
-
-				params.Cursor = sentryclient.ParseNextPaginationCursor(listHttpResp.HTTPResponse)
-				if params.Cursor == nil {
-					break
-				}
+				})
 			}
+
+			wg.Wait()
 
 			return nil
 		},
@@ -168,52 +181,11 @@ func TestAccAlertResource_validation(t *testing.T) {
 				`,
 				ExpectError: acctest.ExpectLiteralError(`Attribute "action_filters[0].conditions[0].assigned_to" cannot be specified when "action_filters[0].conditions[0].age_comparison" is specified`),
 			},
-			{
-				PlanOnly: true,
-				Config: `
-					resource "sentry_alert" "test" {
-						organization = "1"
-						name         = "alert name"
-
-						frequency_minutes = 1440
-						environment       = "production"
-						monitor_ids       = ["1"]
-
-						trigger_conditions = []
-
-						action_filters = [
-							{
-								logic_type = "all"
-								conditions = [
-									{
-										age_comparison = {
-											value = 1
-											time = "minute"
-											comparison_type = "older"
-										}
-									}
-								]
-								actions = [
-									{
-										email = {
-											target_type = "issue_owners"
-											fallthrough_type = "AllMembers"
-										}
-										plugin = {}
-									},
-								]
-							}
-						]
-					}
-				`,
-				ExpectError: acctest.ExpectLiteralError(`Attribute "action_filters[0].actions[0].plugin" cannot be specified when "action_filters[0].actions[0].email" is specified`),
-			},
 		},
 	})
 }
 
 func TestAccAlertResource_basic(t *testing.T) {
-	teamName := acctest.RandomWithPrefix("tf-team")
 	projectName := acctest.RandomWithPrefix("tf-project")
 	monitorName := acctest.RandomWithPrefix("tf-monitor")
 	alertName := acctest.RandomWithPrefix("tf-alert")
@@ -229,14 +201,14 @@ func TestAccAlertResource_basic(t *testing.T) {
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: testAccAlertResourceConfig(teamName, projectName, monitorName, alertName, opsgenieTeamName),
+				Config: testAccAlertResourceConfig(projectName, monitorName, alertName, opsgenieTeamName),
 				ConfigStateChecks: append(
 					checks,
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("name"), knownvalue.StringExact(alertName)),
 				),
 			},
 			{
-				Config: testAccAlertResourceConfig(teamName, projectName, monitorName, alertName+"-updated", opsgenieTeamName),
+				Config: testAccAlertResourceConfig(projectName, monitorName, alertName+"-updated", opsgenieTeamName),
 				ConfigStateChecks: append(
 					checks,
 					statecheck.ExpectKnownValue(rn, tfjsonpath.New("name"), knownvalue.StringExact(alertName+"-updated")),
@@ -245,15 +217,32 @@ func TestAccAlertResource_basic(t *testing.T) {
 			{
 				ResourceName:      rn,
 				ImportState:       true,
-				ImportStateIdFunc: acctest.TwoPartImportStateIdFunc(rn, "organization"),
+				ImportStateIdFunc: resourceid.ImportState2PartIDFunc(rn, "organization", "id"),
 				ImportStateVerify: true,
+				ImportStateVerifyIgnore: []string{
+					"action_filters.0.actions.3.slack.channel_name", // Sentry API returns the channel name with `#` prefix
+				},
+			},
+			{
+				ResourceName: rn,
+				ImportState:  true,
+				ImportStateIdFunc: resourceid.ImportStateURL2PartIDFunc(
+					rn,
+					"https://{organization}.sentry.io/monitors/alerts/{id}/",
+					"organization", "organization",
+					"id", "id",
+				),
+				ImportStateVerify: true,
+				ImportStateVerifyIgnore: []string{
+					"action_filters.0.actions.3.slack.channel_name", // Sentry API returns the channel name with `#` prefix
+				},
 			},
 		},
 	})
 }
 
-func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgenieTeamName string) string {
-	return testAccMetricMonitorResourceConfig(teamName, projectName, monitorName, `
+func testAccAlertResourceConfig(projectName, monitorName, name, opsgenieTeamName string) string {
+	return testAccMetricMonitorResourceConfig(projectName, monitorName, `
 		aggregate = "count()"
 		dataset = "events"
 		event_types = ["default", "error"]
@@ -278,8 +267,8 @@ func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgen
 		}
 	`) + fmt.Sprintf(`
 		resource "sentry_alert" "test" {
-			organization = data.sentry_organization.test.slug
-			name         = "%[1]s"
+			organization = "%[1]s"
+			name         = "%[2]s"
 
 			frequency_minutes = 1440
 			environment       = "production"
@@ -306,7 +295,7 @@ func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgen
 						{
 							assigned_to = {
 								target_type = "Team"
-								target_id = sentry_team.test.internal_id
+								target_id = "%[3]s"
 							}
 						},
 						{
@@ -320,7 +309,9 @@ func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgen
 							}
 						},
 						{
-							issue_priority_deescalating = {}
+							issue_priority_deescalating = {
+								comparison = 75
+							}
 						},
 						{
 							issue_priority_greater_or_equal = {
@@ -403,6 +394,53 @@ func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgen
 								match = "eq"
 								level = 50
 							}
+						},
+						{
+							issue_type = {
+								value   = "performance_large_http_payload"
+								include = false
+							}
+						},
+						{
+							event_attribute = {
+								attribute = "message"
+								match     = "is"
+							}
+						},
+						{
+							event_attribute = {
+								attribute = "message"
+								match     = "ns"
+							}
+						},
+						{
+							event_frequency_count = {
+								value = 10
+								filters = [
+									{ attribute = "message", match = "co", value = "error" }
+								]
+								interval = "1m"
+							}
+						},
+						{
+							event_frequency_percent = {
+								value = 50
+								filters = [
+									{ key = "tag", match = "eq", value = "test" }
+								]
+								interval  = "1h"
+								comparison_interval = "1w"
+							}
+						},
+						{
+							percent_sessions_percent = {
+								value = 25
+								filters = [
+									{ attribute = "message", match = "eq", value = "crash" }
+								]
+								interval            = "1h"
+								comparison_interval = "1w"
+							}
 						}
 					]
 					actions = [
@@ -415,11 +453,8 @@ func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgen
 						{
 							email = {
 								target_type = "team"
-								target_id = sentry_team.test.internal_id
+								target_id = "%[3]s"
 							}
-						},
-						{
-							plugin = {}
 						},
 						{
 							slack = {
@@ -429,14 +464,13 @@ func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgen
 								notes          = "Please <http://example.com|click here> for triage information"
 							}
 						},
-						// FIXME:
-						// {
-						// 	slack = {
-						// 		integration_id = data.sentry_organization_integration.slack.id
-						// 		channel_name   = "general"
-						// 		notes          = "Please <http://example.com|click here> for triage information"
-						// 	}
-						// },
+						{
+							slack = {
+								integration_id = data.sentry_organization_integration.slack.id
+								channel_name   = "general"
+								notes          = "Please <http://example.com|click here> for triage information"
+							}
+						},
 						{
 							pagerduty = {
 								integration_id = sentry_integration_pagerduty.pagerduty.integration_id
@@ -474,14 +508,19 @@ func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgen
 								labels         = ["bug"]
 							}
 						},
+						{
+							webhook = {
+								service = "terraform-provider-sentry-ea4fdd"
+							}
+						},
 					]
 				}
 			]
 		}
-	`, name) + fmt.Sprintf(`
+	`, acctest.TestOrganization, name, acctest.TestTeam.Id) + fmt.Sprintf(`
 		# Slack
 		data "sentry_organization_integration" "slack" {
-			organization = data.sentry_organization.test.slug
+			organization = "%[1]s"
 			provider_key = "slack"
 			name         = "A2 Marketing"  # TODO: Use a real integration name
 		}
@@ -517,8 +556,8 @@ func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgen
 		resource "sentry_integration_opsgenie" "opsgenie" {
 			organization    = data.sentry_organization_integration.opsgenie.organization
 			integration_id  = data.sentry_organization_integration.opsgenie.id
-			integration_key = "%[1]s"
-			team            = "%[2]s"
+			integration_key = "%[2]s"
+			team            = "%[3]s"
 		}
 
 		# GitHub
@@ -527,5 +566,5 @@ func testAccAlertResourceConfig(teamName, projectName, monitorName, name, opsgen
 			provider_key = "github"
 			name         = "jianyuan"
 		}
-	`, acctest.TestOpsgenieIntegrationKey, opsgenieTeamName)
+	`, acctest.TestOrganization, acctest.TestOpsgenieIntegrationKey, opsgenieTeamName)
 }

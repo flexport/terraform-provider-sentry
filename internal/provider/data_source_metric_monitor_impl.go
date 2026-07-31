@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
 	"github.com/jianyuan/terraform-provider-sentry/internal/sentrydata"
 )
@@ -45,7 +46,12 @@ func (m *MetricMonitorDataSourceModel) fill(ctx context.Context, data apiclient.
 		outCondition.Type.Set(inCondition.Type)
 
 		if inComparison, err := inCondition.Comparison.AsProjectMonitorConditionGroupConditionComparison1(); err == nil {
-			outCondition.Comparison.Set(inComparison)
+			if v, err := inComparison.Float64(); err == nil {
+				outCondition.Comparison = types.Float64Value(v)
+			} else {
+				diags.AddError("Invalid comparison", "Unable to unmarshal comparison")
+				return
+			}
 		} else if inComparison, err := inCondition.Comparison.AsProjectMonitorConditionGroupConditionComparison2(); err == nil {
 			outCondition.ComparisonSensitivity.Set(inComparison.Sensitivity)
 			outCondition.ComparisonThresholdType.Set(sentrydata.AlertRuleThresholdTypeIdToName[inComparison.ThresholdType])
@@ -101,8 +107,7 @@ func (m *MetricMonitorDataSourceModel) fill(ctx context.Context, data apiclient.
 	if v, err := dataSource.QueryObj.SnubaQuery.QueryType.Get(); err == nil {
 		m.QueryType.Set(sentrydata.SnubaQueryTypeIdToName[v])
 	} else {
-		// BUG?
-		m.QueryType.Set(sentrydata.SnubaQueryTypeIdToName[0])
+		m.QueryType.SetNull()
 	}
 	if v, err := dataSource.QueryObj.SnubaQuery.TimeWindow.Get(); err == nil {
 		m.TimeWindowSeconds.Set(v)

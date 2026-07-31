@@ -49,7 +49,6 @@ var IssueGroupCategories = []string{
 	"Mobile",
 	"Ai_Detected",
 	"Preprod",
-	"Instrumentation",
 	"Configuration",
 }
 
@@ -72,7 +71,6 @@ var IssueGroupCategoryNameToId = map[string]string{
 	"Mobile":            "15",
 	"Ai_Detected":       "16",
 	"Preprod":           "17",
-	"Instrumentation":   "18",
 	"Configuration":     "19",
 }
 
@@ -95,7 +93,6 @@ var IssueGroupCategoryIdToName = map[string]string{
 	"15": "Mobile",
 	"16": "Ai_Detected",
 	"17": "Preprod",
-	"18": "Instrumentation",
 	"19": "Configuration",
 }
 
@@ -151,6 +148,26 @@ var MatchTypes = []string{
 	"NOT_STARTS_WITH",
 	"NOT_IN",
 	"STARTS_WITH",
+}
+
+// https://github.com/getsentry/sentry/blob/master/src/sentry/rules/match.py
+var MatchTypeIds = []string{
+	"co",
+	"ew",
+	"eq",
+	"gte",
+	"gt",
+	"is",
+	"in",
+	"lte",
+	"lt",
+	"nc",
+	"new",
+	"ne",
+	"ns",
+	"nsw",
+	"nin",
+	"sw",
 }
 
 // https://github.com/getsentry/sentry/blob/master/src/sentry/rules/match.py
@@ -217,11 +234,9 @@ var DashboardWidgetTypes = []string{
 var DashboardWidgetDisplayTypes = []string{
 	"line",
 	"area",
-	"stacked_area",
 	"bar",
 	"table",
 	"big_number",
-	"top_n",
 	"details",
 	"categorical_bar",
 	"wheel",
@@ -229,6 +244,7 @@ var DashboardWidgetDisplayTypes = []string{
 	"server_tree",
 	"text",
 	"agents_traces_table",
+	"heatmap",
 }
 
 // https://github.com/getsentry/sentry/blob/master/src/sentry/models/project.py
@@ -1148,6 +1164,7 @@ var DataConditionTypes = []string{
 	"percent_sessions_count",
 	"percent_sessions_percent",
 	"every_event",
+	"seer_activity_trigger",
 }
 
 // https://github.com/getsentry/sentry/blob/master/src/sentry/workflow_engine/models/data_condition.py

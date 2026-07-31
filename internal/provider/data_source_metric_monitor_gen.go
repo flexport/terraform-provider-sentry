@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/jianyuan/terraform-provider-sentry/internal/apiclient"
 	supertypes "github.com/orange-cloudavenue/terraform-plugin-framework-supertypes"
 )
@@ -29,7 +30,7 @@ func (d *MetricMonitorDataSource) Metadata(ctx context.Context, req datasource.M
 
 func (d *MetricMonitorDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.\n\nRetrieve a Metric Monitor for a Project.",
+		MarkdownDescription: "Retrieve a Metric Monitor for a Project.",
 		Attributes: map[string]schema.Attribute{
 			"organization": schema.StringAttribute{
 				MarkdownDescription: "The organization slug or internal ID of the monitor.",
@@ -156,10 +157,10 @@ func (d *MetricMonitorDataSource) Schema(ctx context.Context, req datasource.Sch
 									Computed:            true,
 									CustomType:          supertypes.StringType{},
 								},
-								"comparison": schema.Int64Attribute{
+								"comparison": schema.Float64Attribute{
 									MarkdownDescription: "The value to compare against. Only available for types other than `anomaly_detection`.",
 									Computed:            true,
-									CustomType:          supertypes.Int64Type{},
+									CustomType:          types.Float64Type,
 								},
 								"comparison_sensitivity": schema.StringAttribute{
 									MarkdownDescription: "Level of anomaly responsiveness. Higher thresholds means alerts for most anomalies. Lower thresholds means alerts only for larger ones. Only available for `anomaly_detection` type.",
@@ -267,7 +268,7 @@ type MetricMonitorDataSourceModelConditionGroup struct {
 
 type MetricMonitorDataSourceModelConditionGroupConditionsItem struct {
 	Type                    supertypes.StringValue `tfsdk:"type"`
-	Comparison              supertypes.Int64Value  `tfsdk:"comparison"`
+	Comparison              types.Float64          `tfsdk:"comparison"`
 	ComparisonSensitivity   supertypes.StringValue `tfsdk:"comparison_sensitivity"`
 	ComparisonThresholdType supertypes.StringValue `tfsdk:"comparison_threshold_type"`
 	ConditionResult         supertypes.Int64Value  `tfsdk:"condition_result"`

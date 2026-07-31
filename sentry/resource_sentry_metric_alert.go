@@ -2,17 +2,17 @@ package sentry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
-	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/jianyuan/go-sentry/v2/sentry"
 	"github.com/jianyuan/terraform-provider-sentry/internal/providerdata"
-	"github.com/jianyuan/terraform-provider-sentry/internal/tfutils"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 )
 
 func resourceSentryMetricAlert() *schema.Resource {
@@ -246,14 +246,18 @@ func resourceSentryMetricAlertCreate(ctx context.Context, d *schema.ResourceData
 		return diag.FromErr(err)
 	}
 
-	d.SetId(tfutils.BuildThreePartId(org, project, sentry.StringValue(alert.ID)))
+	id, err := resourceid.BuildPath3(org, project, sentry.StringValue(alert.ID))
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	d.SetId(id)
 	return resourceSentryMetricAlertRead(ctx, d, meta)
 }
 
 func resourceSentryMetricAlertRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	client := meta.(*providerdata.ProviderData).Client
 
-	org, project, alertID, err := tfutils.SplitThreePartId(d.Id(), "organization-slug", "project-slug", "alert-id")
+	org, project, alertID, err := resourceid.Split3Path(d.Id(), "organization-slug", "project-slug", "alert-id")
 	if err != nil {
 		diag.FromErr(err)
 	}
@@ -278,8 +282,12 @@ func resourceSentryMetricAlertRead(ctx context.Context, d *schema.ResourceData, 
 		"alert": fmt.Sprintf("%+v", alert),
 	})
 
-	d.SetId(tfutils.BuildThreePartId(org, project, sentry.StringValue(alert.ID)))
-	retError := multierror.Append(
+	id, err := resourceid.BuildPath3(org, project, sentry.StringValue(alert.ID))
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	d.SetId(id)
+	errs := []error{
 		d.Set("organization", org),
 		d.Set("name", alert.Name),
 		d.Set("environment", alert.Environment),
@@ -294,20 +302,20 @@ func resourceSentryMetricAlertRead(ctx context.Context, d *schema.ResourceData, 
 		d.Set("trigger", flattenMetricAlertTriggers(alert.Triggers)),
 		d.Set("owner", alert.Owner),
 		d.Set("internal_id", alert.ID),
-	)
+	}
 	if len(alert.Projects) == 1 {
-		retError = multierror.Append(
-			retError,
+		errs = append(
+			errs,
 			d.Set("project", alert.Projects[0]),
 		)
 	}
-	return diag.FromErr(retError.ErrorOrNil())
+	return diag.FromErr(errors.Join(errs...))
 }
 
 func resourceSentryMetricAlertUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	client := meta.(*providerdata.ProviderData).Client
 
-	org, project, alertID, err := tfutils.SplitThreePartId(d.Id(), "organization-slug", "project-slug", "alert-id")
+	org, project, alertID, err := resourceid.Split3Path(d.Id(), "organization-slug", "project-slug", "alert-id")
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -323,14 +331,18 @@ func resourceSentryMetricAlertUpdate(ctx context.Context, d *schema.ResourceData
 		return diag.FromErr(err)
 	}
 
-	d.SetId(tfutils.BuildThreePartId(org, project, sentry.StringValue(alert.ID)))
+	id, err := resourceid.BuildPath3(org, project, sentry.StringValue(alert.ID))
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	d.SetId(id)
 	return resourceSentryMetricAlertRead(ctx, d, meta)
 }
 
 func resourceSentryMetricAlertDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	client := meta.(*providerdata.ProviderData).Client
 
-	org, project, alertID, err := tfutils.SplitThreePartId(d.Id(), "organization-slug", "project-slug", "alert-id")
+	org, project, alertID, err := resourceid.Split3Path(d.Id(), "organization-slug", "project-slug", "alert-id")
 	if err != nil {
 		return diag.FromErr(err)
 	}

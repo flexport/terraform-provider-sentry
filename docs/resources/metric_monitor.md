@@ -3,14 +3,11 @@
 page_title: "sentry_metric_monitor Resource - terraform-provider-sentry"
 subcategory: ""
 description: |-
-  ⚠️ This resource is currently in beta and may be subject to change. It is supported by New Monitors and Alerts https://docs.sentry.io/product/new-monitors-and-alerts/ and may not be viewable in the UI today.
   Create a Metric Monitor for a Project.
   For more information about configuring metric monitors, see Create a Monitor for a Project https://docs.sentry.io/api/monitors/create-a-monitor-for-a-project/.
 ---
 
 # sentry_metric_monitor (Resource)
-
-⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.
 
 Create a Metric Monitor for a Project.
 
@@ -200,7 +197,7 @@ Optional:
 Required:
 
 - `condition_result` (Number) When the condition is met, the result will be set to this value.
-- `type` (String) The type of condition. Valid values are: `eq`, `gte`, `gt`, `lte`, `lt`, `ne`, `anomaly_detection`, `age_comparison`, `assigned_to`, `event_attribute`, `event_created_by_detector`, `event_seen_count`, `existing_high_priority_issue`, `first_seen_event`, `issue_category`, `issue_occurrences`, `issue_open_duration`, `issue_priority_equals`, `issue_priority_deescalating`, `issue_priority_greater_or_equal`, `issue_resolution_change`, `issue_resolved_trigger`, `issue_type`, `latest_adopted_release`, `latest_release`, `level`, `new_high_priority_issue`, `reappeared_event`, `regression_event`, `tagged_event`, `event_frequency_count`, `event_frequency_percent`, `event_unique_user_frequency_count`, `event_unique_user_frequency_percent`, `percent_sessions_count`, `percent_sessions_percent`, and `every_event`.
+- `type` (String) The type of condition. Valid values are: `eq`, `gte`, `gt`, `lte`, `lt`, `ne`, `anomaly_detection`, `age_comparison`, `assigned_to`, `event_attribute`, `event_created_by_detector`, `event_seen_count`, `existing_high_priority_issue`, `first_seen_event`, `issue_category`, `issue_occurrences`, `issue_open_duration`, `issue_priority_equals`, `issue_priority_deescalating`, `issue_priority_greater_or_equal`, `issue_resolution_change`, `issue_resolved_trigger`, `issue_type`, `latest_adopted_release`, `latest_release`, `level`, `new_high_priority_issue`, `reappeared_event`, `regression_event`, `tagged_event`, `event_frequency_count`, `event_frequency_percent`, `event_unique_user_frequency_count`, `event_unique_user_frequency_percent`, `percent_sessions_count`, `percent_sessions_percent`, `every_event`, and `seer_activity_trigger`.
 
 Optional:
 
@@ -237,8 +234,10 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
+# import using the full URL:
+terraform import sentry_metric_monitor.default https://{organization}.sentry.io/monitors/{id}/
+
 # import using the organization and monitor id from the URL:
-# https://[org-slug].sentry.io/monitors/[monitor-id]/
-# project slug is also required
-terraform import sentry_metric_monitor.default org-slug/project-slug/monitor-id
+# https://{organization}.sentry.io/monitors/{id}/
+terraform import sentry_metric_monitor.default {organization}/{id}
 ```

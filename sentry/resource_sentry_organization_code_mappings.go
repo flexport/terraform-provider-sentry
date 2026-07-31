@@ -2,14 +2,14 @@ package sentry
 
 import (
 	"context"
+	"errors"
 
-	"github.com/hashicorp/go-multierror"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/jianyuan/go-sentry/v2/sentry"
 	"github.com/jianyuan/terraform-provider-sentry/internal/providerdata"
-	"github.com/jianyuan/terraform-provider-sentry/internal/tfutils"
+	"github.com/jianyuan/terraform-provider-sentry/internal/resourceid"
 )
 
 func resourceSentryOrganizationCodeMapping() *schema.Resource {
@@ -140,7 +140,7 @@ func resourceSentryOrganizationCodeMappingRead(ctx context.Context, d *schema.Re
 	for _, orgCodeMapping := range orgCodeMappings {
 		if orgCodeMapping.ID == id {
 			d.SetId(orgCodeMapping.ID)
-			retErr := multierror.Append(
+			err := errors.Join(
 				d.Set("internal_id", orgCodeMapping.ID),
 				d.Set("integration_id", orgCodeMapping.IntegrationId),
 				d.Set("repository_id", orgCodeMapping.RepoId),
@@ -149,7 +149,7 @@ func resourceSentryOrganizationCodeMappingRead(ctx context.Context, d *schema.Re
 				d.Set("stack_root", orgCodeMapping.StackRoot),
 				d.Set("source_root", orgCodeMapping.SourceRoot),
 			)
-			return diag.FromErr(retErr.ErrorOrNil())
+			return diag.FromErr(err)
 		}
 	}
 
@@ -202,7 +202,7 @@ func resourceSentryOrganizationCodeMappingDelete(ctx context.Context, d *schema.
 }
 
 func importSentryOrganizationCodeMapping(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	org, id, err := tfutils.SplitTwoPartId(d.Id(), "organization-slug", "id")
+	org, id, err := resourceid.Split2Path(d.Id(), "organization-slug", "id")
 	if err != nil {
 		return nil, err
 	}

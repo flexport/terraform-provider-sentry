@@ -5,9 +5,11 @@ import { withExactlyOneAttribute } from "../utils";
 export default {
   name: "alert",
   description: dedent.withOptions({ trimWhitespace: true })`
-      ⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.
-
       Create an Alert for a Monitor in an Organization. Monitors must be created separately using the [\`sentry_cron_monitor\`](cron_monitor.md), [\`sentry_metric_monitor\`](metric_monitor.md), or [\`sentry_uptime_monitor\`](uptime_monitor.md) resources.
+
+      Additionally, [default monitors](https://docs.sentry.io/product/new-monitors-and-alerts/monitors/#default-monitors) are automatically created for each project. Use the following data sources to retrieve them:
+        - [\`sentry_project_issue_stream_monitor\`](../data-sources/project_issue_stream_monitor.md): The default monitor tracking new issues of all types created for a project, including issue types that may not have a dedicated Monitor detecting them (ex. Replay issues)
+        - [\`sentry_project_error_monitor\`](../data-sources/project_error_monitor.md): The default monitor based on issue grouping/fingerprint rules.
     `,
   api: {
     model: "OrganizationWorkflow",
@@ -23,7 +25,10 @@ export default {
   generate: {
     modelFillers: false,
   },
-  importStateAttributes: ["organization", "id"],
+  import: {
+    url: "https://{organization}.sentry.io/monitors/alerts/{id}/",
+    targetAttributes: ["organization", "id"],
+  },
   attributes: [
     {
       name: "id",
@@ -70,7 +75,7 @@ export default {
     },
     {
       name: "frequency_minutes",
-      type: "int",
+      type: "int64",
       description: "How often the alert should fire in minutes.",
       computedOptionalRequired: "required",
     },
@@ -78,8 +83,7 @@ export default {
       name: "trigger_conditions",
       type: "list_nested",
       description: "The conditions on which the alert will trigger.",
-      computedOptionalRequired: "required",
-      validators: ["listvalidator.SizeAtLeast(1)"],
+      computedOptionalRequired: "computed_optional",
       attributes: withExactlyOneAttribute([
         {
           name: "first_seen_event",
@@ -148,7 +152,7 @@ export default {
                 },
                 {
                   name: "value",
-                  type: "int",
+                  type: "int64",
                   description: "The value of the age comparison.",
                   computedOptionalRequired: "required",
                   validators: ["int64validator.AtLeast(1)"],
@@ -196,7 +200,7 @@ export default {
               attributes: [
                 {
                   name: "value",
-                  type: "int",
+                  type: "int64",
                   description: "The issue category to filter to.",
                   computedOptionalRequired: "required",
                 },
@@ -217,7 +221,7 @@ export default {
               attributes: [
                 {
                   name: "value",
-                  type: "int",
+                  type: "int64",
                   description:
                     "A positive integer representing how many times the issue has to happen before the alert will fire.",
                   computedOptionalRequired: "required",
@@ -230,7 +234,15 @@ export default {
               type: "single_nested",
               description: "De-escalation.",
               computedOptionalRequired: "optional",
-              attributes: [],
+              attributes: [
+                {
+                  name: "comparison",
+                  type: "int64",
+                  description:
+                    "The minimum priority threshold required to trigger a de-escalation event. The rule triggers when the historical peak priority meets this threshold, and the current priority drops below it.",
+                  computedOptionalRequired: "required",
+                },
+              ],
             },
             {
               name: "issue_priority_greater_or_equal",
@@ -240,9 +252,9 @@ export default {
               attributes: [
                 {
                   name: "comparison",
-                  type: "int",
+                  type: "int64",
                   description:
-                    "he priority the issue must be for the alert to fire.",
+                    "The priority the issue must be for the alert to fire.",
                   computedOptionalRequired: "required",
                 },
               ],
@@ -255,7 +267,7 @@ export default {
               attributes: [
                 {
                   name: "value",
-                  type: "int",
+                  type: "int64",
                   description:
                     "A positive integer representing the number of users that must be affected before the alert will fire.",
                   computedOptionalRequired: "required",
@@ -320,11 +332,53 @@ export default {
               attributes: [
                 {
                   name: "value",
-                  type: "int",
+                  type: "int64",
                   description:
                     "A positive integer representing the number of events in an issue that must come in before the alert will fire.",
                   computedOptionalRequired: "required",
                   validators: ["int64validator.AtLeast(1)"],
+                },
+                {
+                  name: "filters",
+                  type: "list_nested",
+                  description:
+                    "A list of additional sub-filters to evaluate before the alert will fire.",
+                  computedOptionalRequired: "computed_optional",
+                  attributes: [
+                    {
+                      name: "key",
+                      type: "string",
+                      description:
+                        "The key of the filter. Conflicts with `attribute`.",
+                      computedOptionalRequired: "optional",
+                      validators: [
+                        `stringvalidator.ConflictsWith(path.MatchRelative().AtParent().AtName("attribute"))`,
+                      ],
+                    },
+                    {
+                      name: "attribute",
+                      type: "string",
+                      description:
+                        "The attribute of the filter. Conflicts with `key`.",
+                      computedOptionalRequired: "optional",
+                      validators: [
+                        `stringvalidator.ConflictsWith(path.MatchRelative().AtParent().AtName("key"))`,
+                      ],
+                    },
+                    {
+                      name: "match",
+                      type: "string",
+                      description: "The match type of the filter.",
+                      computedOptionalRequired: "optional",
+                      enum: "sentrydata.MatchTypeIds",
+                    },
+                    {
+                      name: "value",
+                      type: "string",
+                      description: "The value of the filter.",
+                      computedOptionalRequired: "optional",
+                    },
+                  ],
                 },
                 {
                   name: "interval",
@@ -344,11 +398,53 @@ export default {
               attributes: [
                 {
                   name: "value",
-                  type: "int",
+                  type: "int64",
                   description:
                     "A positive integer representing the number of events in an issue that must come in before the alert will fire.",
                   computedOptionalRequired: "required",
                   validators: ["int64validator.AtLeast(1)"],
+                },
+                {
+                  name: "filters",
+                  type: "list_nested",
+                  description:
+                    "A list of additional sub-filters to evaluate before the alert will fire.",
+                  computedOptionalRequired: "computed_optional",
+                  attributes: [
+                    {
+                      name: "key",
+                      type: "string",
+                      description:
+                        "The key of the filter. Conflicts with `attribute`.",
+                      computedOptionalRequired: "optional",
+                      validators: [
+                        `stringvalidator.ConflictsWith(path.MatchRelative().AtParent().AtName("attribute"))`,
+                      ],
+                    },
+                    {
+                      name: "attribute",
+                      type: "string",
+                      description:
+                        "The attribute of the filter. Conflicts with `key`.",
+                      computedOptionalRequired: "optional",
+                      validators: [
+                        `stringvalidator.ConflictsWith(path.MatchRelative().AtParent().AtName("key"))`,
+                      ],
+                    },
+                    {
+                      name: "match",
+                      type: "string",
+                      description: "The match type of the filter.",
+                      computedOptionalRequired: "optional",
+                      enum: "sentrydata.MatchTypeIds",
+                    },
+                    {
+                      name: "value",
+                      type: "string",
+                      description: "The value of the filter.",
+                      computedOptionalRequired: "optional",
+                    },
+                  ],
                 },
                 {
                   name: "interval",
@@ -375,7 +471,7 @@ export default {
               attributes: [
                 {
                   name: "value",
-                  type: "int",
+                  type: "int64",
                   description:
                     "A positive integer representing the number of events in an issue that must come in before the alert will fire.",
                   computedOptionalRequired: "required",
@@ -399,11 +495,53 @@ export default {
               attributes: [
                 {
                   name: "value",
-                  type: "int",
+                  type: "int64",
                   description:
                     "A positive integer representing the number of events in an issue that must come in before the alert will fire.",
                   computedOptionalRequired: "required",
                   validators: ["int64validator.AtLeast(1)"],
+                },
+                {
+                  name: "filters",
+                  type: "list_nested",
+                  description:
+                    "A list of additional sub-filters to evaluate before the alert will fire.",
+                  computedOptionalRequired: "computed_optional",
+                  attributes: [
+                    {
+                      name: "key",
+                      type: "string",
+                      description:
+                        "The key of the filter. Conflicts with `attribute`.",
+                      computedOptionalRequired: "optional",
+                      validators: [
+                        `stringvalidator.ConflictsWith(path.MatchRelative().AtParent().AtName("attribute"))`,
+                      ],
+                    },
+                    {
+                      name: "attribute",
+                      type: "string",
+                      description:
+                        "The attribute of the filter. Conflicts with `key`.",
+                      computedOptionalRequired: "optional",
+                      validators: [
+                        `stringvalidator.ConflictsWith(path.MatchRelative().AtParent().AtName("key"))`,
+                      ],
+                    },
+                    {
+                      name: "match",
+                      type: "string",
+                      description: "The match type of the filter.",
+                      computedOptionalRequired: "optional",
+                      enum: "sentrydata.MatchTypeIds",
+                    },
+                    {
+                      name: "value",
+                      type: "string",
+                      description: "The value of the filter.",
+                      computedOptionalRequired: "optional",
+                    },
+                  ],
                 },
                 {
                   name: "interval",
@@ -443,8 +581,12 @@ export default {
                 {
                   name: "value",
                   type: "string",
-                  description: "The value to compare against.",
-                  computedOptionalRequired: "required",
+                  description:
+                    "The value to compare against. Not required when `match` is `is` or `ns`.",
+                  computedOptionalRequired: "optional",
+                  validators: [
+                    `fstringvalidator.NullIfAttributeIsOneOf(path.MatchRelative().AtParent().AtName("match"), []attr.Value{supertypes.NewStringValue("is"), supertypes.NewStringValue("ns")})`,
+                  ],
                 },
               ],
             },
@@ -529,8 +671,30 @@ export default {
                 },
                 {
                   name: "level",
-                  type: "int",
+                  type: "int64",
                   description: "The level to compare against.",
+                  computedOptionalRequired: "required",
+                },
+              ],
+            },
+            {
+              name: "issue_type",
+              type: "single_nested",
+              description: "Issue type is (or is not) `value`.",
+              computedOptionalRequired: "optional",
+              attributes: [
+                {
+                  name: "value",
+                  type: "string",
+                  description:
+                    "The issue type slug (e.g. `performance_large_http_payload`).",
+                  computedOptionalRequired: "required",
+                },
+                {
+                  name: "include",
+                  type: "bool",
+                  description:
+                    "If `true`, matches when the issue type equals `value`. If `false`, matches when it does not equal `value`.",
                   computedOptionalRequired: "required",
                 },
               ],
@@ -587,6 +751,8 @@ export default {
               type: "single_nested",
               description:
                 "Send a notification to all legacy integrations (plugins).",
+              deprecationMessage:
+                "Action type plugin is deprecated and cannot be created.",
               computedOptionalRequired: "optional",
               attributes: [],
             },
@@ -608,6 +774,10 @@ export default {
                   description:
                     "The name of the Slack channel to send the notification to (e.g., #critical, Jane Schmidt).",
                   computedOptionalRequired: "required",
+                  customType: {
+                    type: "sentrytypes.SlackChannelType{}",
+                    value: "sentrytypes.SlackChannel",
+                  },
                 },
                 {
                   name: "channel_id",
@@ -907,6 +1077,22 @@ export default {
                       computedOptionalRequired: "computed_optional",
                     },
                   ],
+                },
+              ],
+            },
+            {
+              name: "webhook",
+              type: "single_nested",
+              description:
+                "Send a notification via a legacy integration service (e.g. an internal integration's webhook). This is the successor to the `notify_event_service` action on the legacy `sentry_issue_alert` resource.",
+              computedOptionalRequired: "optional",
+              attributes: [
+                {
+                  name: "service",
+                  type: "string",
+                  description:
+                    "The slug of the integration service to notify. Use the special value `webhooks` to notify all legacy plugin webhooks.",
+                  computedOptionalRequired: "required",
                 },
               ],
             },

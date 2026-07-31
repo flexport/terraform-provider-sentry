@@ -4,8 +4,6 @@ import type { Resource } from "../schema";
 export default {
   name: "uptime_monitor",
   description: dedent.withOptions({ trimWhitespace: true })`
-      ⚠️ This resource is currently in beta and may be subject to change. It is supported by [New Monitors and Alerts](https://docs.sentry.io/product/new-monitors-and-alerts/) and may not be viewable in the UI today.
-
       Create an Uptime Monitor for a Project.
 
       The \`assertion_json\` argument is a JSON string that represents the assertion to use for the monitor. It is a JSON object with a single key \`root\` whose value is the root operation of the assertion. The assertion is a tree of operations that are evaluated in order. Operations may be constructed using the \`op_\` functions.
@@ -24,7 +22,10 @@ export default {
   generate: {
     modelFillers: false,
   },
-  importStateAttributes: ["organization", "project", "id"],
+  import: {
+    url: "https://{organization}.sentry.io/monitors/{id}/",
+    targetAttributes: ["organization", "id"],
+  },
   attributes: [
     {
       name: "id",
@@ -138,14 +139,14 @@ export default {
     },
     {
       name: "interval_seconds",
-      type: "int",
+      type: "int64",
       description: "The amount of time between each uptime check request.",
       computedOptionalRequired: "required",
       enum: "sentrydata.UptimeSubscriptionIntervalSeconds",
     },
     {
       name: "timeout_ms",
-      type: "int",
+      type: "int64",
       description: "The request timeout in milliseconds.",
       computedOptionalRequired: "required",
     },
@@ -157,7 +158,7 @@ export default {
     },
     {
       name: "recovery_threshold",
-      type: "int",
+      type: "int64",
       description:
         "Number of consecutive successful checks required to mark monitor as recovered. Defaults to `1`.",
       computedOptionalRequired: "computed_optional",
@@ -165,7 +166,7 @@ export default {
     },
     {
       name: "downtime_threshold",
-      type: "int",
+      type: "int64",
       description:
         "Number of consecutive failed checks required to mark monitor as down. Defaults to `3`.",
       computedOptionalRequired: "computed_optional",
