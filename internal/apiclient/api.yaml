@@ -40,6 +40,8 @@ paths:
     get:
       summary: List Teams
       operationId: listOrganizationTeams
+      parameters:
+        - $ref: "#/components/parameters/cursor"
       responses:
         "200":
           description: OK
@@ -630,6 +632,7 @@ paths:
               type: object
               required:
                 - name
+                - platform
               properties:
                 name:
                   type: string
@@ -1571,7 +1574,6 @@ components:
           type: string
         platform:
           type: string
-          nullable: true
         dateCreated:
           type: string
           format: date-time
